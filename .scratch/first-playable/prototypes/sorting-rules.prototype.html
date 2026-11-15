@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PROTOTYPE · Peg Game sorting rules</title>
+<style>
+  :root { --accent: #4f46e5; --ink: #1c1c22; --muted: #6b6b76; --line: #e4e4ea; --bg: #fafafb; --card: #fff; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--ink); background: var(--bg); }
+  main { max-width: 1180px; margin: 0 auto; padding: 24px 20px 80px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 28px 0 10px; }
+  h3 { font-size: 14px; margin: 0 0 6px; }
+  .tag { display: inline-block; background: #fde68a; color: #713f12; font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 4px; vertical-align: middle; margin-left: 6px; }
+  .intro { color: var(--muted); max-width: 860px; }
+  .intro ul { margin: 6px 0 0; padding-left: 20px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+  button { font: inherit; cursor: pointer; border: 1px solid var(--line); background: #fff; border-radius: 7px; padding: 6px 12px; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { cursor: default; opacity: .45; }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .status { font-weight: 600; padding: 8px 12px; border-radius: 8px; margin-bottom: 12px; }
+  .status.playing { background: #eef2ff; color: #3730a3; }
+  .status.won { background: #dcfce7; color: #166534; }
+  .status.lost, .status.stuck { background: #fee2e2; color: #991b1b; }
+  .boxes, .buffer { display: flex; gap: 8px; flex-wrap: wrap; }
+  .box { width: 92px; border: 2px solid var(--c); border-radius: 9px; padding: 6px 8px; text-align: center; background: color-mix(in srgb, var(--c) 12%, white); }
+  .box.grey { --c: #b8b8c0; background: repeating-linear-gradient(45deg, #f0f0f3, #f0f0f3 6px, #e6e6ea 6px, #e6e6ea 12px); }
+  .box .name { font-weight: 600; font-size: 13px; }
+  .dots { letter-spacing: 2px; color: var(--c); font-size: 16px; }
+  .slot { width: 34px; height: 34px; border-radius: 50%; border: 2px dashed #cfcfd6; display: grid; place-items: center; font-size: 12px; font-weight: 700; }
+  .slot.full { border: 2px solid rgba(0,0,0,.15); background: var(--c); color: var(--t); }
+  .label { font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+  .events { margin: 0; padding-left: 18px; }
+  .events li { margin: 2px 0; }
+  .events .lose, .events .error { color: #b91c1c; font-weight: 600; }
+  .events .win { color: #15803d; font-weight: 600; }
+  .events .close, .events .new, .events .grey { color: #3730a3; }
+  .events .fall { color: #92400e; }
+  .layer { margin-bottom: 12px; }
+  .parts { display: flex; flex-wrap: wrap; gap: 8px; }
+  .part { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; min-width: 150px; background: #fff; }
+  .part.fallen { opacity: .4; border-style: dashed; }
+  .part .meta { font-size: 12px; color: var(--muted); }
+  .pins { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+  .pin { width: 38px; height: 38px; border-radius: 50%; padding: 0; border: 2px solid rgba(0,0,0,.18); background: var(--c); color: var(--t); font-weight: 700; font-size: 12px; position: relative; }
+  .pin.blocked { opacity: .5; border-style: dashed; border-color: #444; }
+  .pin.blocked::after { content: "🔒"; position: absolute; right: -6px; top: -8px; font-size: 11px; }
+  .pin.removed { background: transparent; color: #bbb; border: 2px dotted #ccc; }
+  .pin.hint { outline: 3px solid var(--accent); outline-offset: 2px; }
+  table { border-collapse: collapse; font-size: 13px; }
+  th, td { border-bottom: 1px solid var(--line); padding: 4px 8px; text-align: right; }
+  th:first-child, td:first-child { text-align: left; }
+  .tabs { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 12px; }
+  .tabs button { border: none; border-bottom: 2px solid transparent; border-radius: 0; background: none; padding: 8px 10px; color: var(--muted); }
+  .tabs button.on { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+  .steps { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 6px; }
+  .steps li { display: flex; gap: 10px; align-items: baseline; }
+  .steps .note { color: var(--muted); font-size: 13px; }
+  .steps button.done { background: #f0fdf4; border-color: #86efac; }
+  .steps button.next { border-color: var(--accent); box-shadow: 0 0 0 2px #e0e7ff; }
+  label.field { display: flex; flex-direction: column; font-size: 12px; color: var(--muted); gap: 2px; }
+  label.field input, label.field select { font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; width: 110px; color: var(--ink); }
+  .out { font-size: 13px; margin-top: 10px; white-space: pre-wrap; }
+  .good { color: #15803d; } .bad { color: #b91c1c; } .meh { color: #a16207; }
+  .counts { display: flex; flex-wrap: wrap; gap: 6px; font-size: 12px; }
+  .counts span { border: 1px solid var(--line); border-radius: 12px; padding: 1px 8px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Peg Game: sorting rules <span class="tag">PROTOTYPE, throw away</span></h1>
+  <div class="intro">
+    <p>A test bench for the sorting rules, with no 3D. The Model is a list of Parts. Each Part holds some Pins and can cover Pins on Parts beneath it. Tap a Pin to remove it. It goes to the open Box of its colour, otherwise to the Buffer. Use it to answer:</p>
+    <ul>
+      <li>Do 5 Boxes, Capacity 3 and a Buffer of 7 feel right?</li>
+      <li>Does the seeded "next Box colour" rule ever make a level that can't be won, or that feels unfair?</li>
+      <li>Do the edge cases behave as expected: grey Boxes at the end, several drains from one Box closing, and losing the moment a Pin fills the last Buffer slot?</li>
+      <li>Which colour count and Box count make a level interesting? Should the defaults change?</li>
+    </ul>
+  </div>
+
+  <div class="grid" style="margin-top:18px">
+    <section>
+      <h2>Board</h2>
+      <div class="card">
+        <div id="status" class="status"></div>
+        <div class="label">Boxes (open colours) <label style="margin-left:10px"><input type="checkbox" id="dev-preview"> Dev: show next Box colour</label></div>
+        <div id="boxes" class="boxes"></div>
+        <div class="label" id="bufferLabel">Buffer</div>
+        <div id="buffer" class="buffer"></div>
+        <div class="label">Pins left per colour (on the Model + in the Buffer)</div>
+        <div id="counts" class="counts"></div>
+        <div class="label">What just happened</div>
+        <ul id="events" class="events"></ul>
+        <div class="row" style="margin-top:12px">
+          <button id="undo">↶ Undo</button>
+          <button id="restart">Restart level</button>
+          <button id="hint">Show a winning next tap</button>
+          <button id="check">Can this position still be won?</button>
+        </div>
+        <div id="checkOut" class="out"></div>
+      </div>
+
+      <h2>Model: tap any Pin (free play)</h2>
+      <div class="card" id="model"></div>
+    </section>
+
+    <section>
+      <h2>Guided walkthroughs</h2>
+      <div class="card">
+        <div id="tabs" class="tabs"></div>
+        <div id="scenario"></div>
+      </div>
+
+      <h2>Level and numbers</h2>
+      <div class="card">
+        <p class="intro" style="margin-top:0">Generate a random layered Model with your own numbers, then check it with the solver and with random tapping.</p>
+        <div class="row" style="align-items:flex-end">
+          <label class="field">Boxes<input id="f-boxes" type="number" min="1" max="8" value="3"></label>
+          <label class="field">Capacity<input id="f-cap" type="number" min="2" max="5" value="3"></label>
+          <label class="field">Buffer size<input id="f-buf" type="number" min="1" max="12" value="5"></label>
+          <label class="field">Colours<input id="f-col" type="number" min="1" max="13" value="5"></label>
+          <label class="field">Pins per colour<select id="f-per"></select></label>
+          <label class="field">Layers of Parts<input id="f-lay" type="number" min="1" max="6" value="4"></label>
+          <label class="field">Seed<input id="f-seed" type="number" value="1"></label>
+          <label class="field">Next-colour rule<select id="f-rule">
+            <option value="uniform">As written: any qualifying colour</option>
+            <option value="buffer-first">Prefer colours in the Buffer</option>
+            <option value="reachable-first">Prefer colours you can reach now</option>
+          </select></label>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <button class="primary" id="gen">New level</button>
+          <button id="stats">Check this level</button>
+          <button id="sweep">Compare numbers (sweep)</button>
+        </div>
+        <div id="statsOut" class="out"></div>
+        <div id="sweepOut" class="out"></div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<script id="rules">
+// =====================================================================
+// Pure rules module. No DOM. This is the part worth lifting into the
+// real codebase. Everything else in this file is a throwaway shell.
+// =====================================================================
+var Rules = (function () {
+  const COLOURS = [
+    { name: 'Red', letter: 'R', hex: '#e5484d' },
+    { name: 'Blue', letter: 'B', hex: '#3e63dd' },
+    { name: 'Green', letter: 'G', hex: '#30a46c' },
+    { name: 'Yellow', letter: 'Y', hex: '#f5d90a', dark: true },
+    { name: 'Purple', letter: 'P', hex: '#8e4ec6' },
+    { name: 'Orange', letter: 'O', hex: '#f76b15' },
+    { name: 'Pink', letter: 'K', hex: '#e93d82' },
+    { name: 'Teal', letter: 'T', hex: '#12a594' },
+    { name: 'Brown', letter: 'N', hex: '#a07553' },
+    { name: 'Lime', letter: 'L', hex: '#99d52a', dark: true },
+    { name: 'Navy', letter: 'V', hex: '#1f2d5c' },
+    { name: 'Maroon', letter: 'M', hex: '#7a1f2b' },
+    { name: 'Sky', letter: 'S', hex: '#7cc4fa', dark: true },
+  ];
+  const BY_LETTER = Object.fromEntries(COLOURS.map((c, i) => [c.letter, i]));
+  const DEFAULTS = { boxes: 5, capacity: 3, bufferSize: 7, rule: 'uniform', seed: 1 };
+  const LAYER_NAMES = ['Shell', 'Panel', 'Frame', 'Core', 'Axle', 'Base'];
+
+  // Integer hash: the seeded colour choice is a pure function of (seed, pick number, qualifying colours).
+  function hash32(a, b) {
+    let h = (Math.imul(a | 0, 0x27d4eb2d) ^ Math.imul((b | 0) + 0x9e3779b9, 0x85ebca6b)) | 0;
+    h = Math.imul(h ^ (h >>> 16), 0x85ebca6b);
+    h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+    return (h ^ (h >>> 16)) >>> 0;
+  }
+  function rng(seed) {
+    let s = seed >>> 0;
+    return () => {
+      s = (s + 0x6d2b79f5) | 0;
+      let t = Math.imul(s ^ (s >>> 15), 1 | s);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  // ---- Level -------------------------------------------------------
+  // raw: { name, boxes?, capacity?, bufferSize?, seed?, rule?,
+  //        parts: [{ name, layer?, pins: [{ colour, coveredBy: [partIndex] }] }] }
+  function makeLevel(raw) {
+    const L = Object.assign({}, DEFAULTS, raw);
+    const parts = raw.parts.map((p, i) => ({ name: p.name, layer: p.layer ?? 0, index: i }));
+    const pins = [];
+    const perColour = {};
+    raw.parts.forEach((p, pi) => p.pins.forEach(pin => {
+      const c = pin.colour;
+      perColour[c] = (perColour[c] || 0) + 1;
+      pins.push({ index: pins.length, id: COLOURS[c].letter + perColour[c], colour: c, part: pi, coveredBy: [...new Set(pin.coveredBy || [])].sort((a, b) => a - b) });
+    }));
+    const colours = Object.keys(perColour).map(Number).sort((a, b) => a - b);
+    const errors = [];
+    for (const c of colours) if (perColour[c] % L.capacity) errors.push(`${COLOURS[c].name} has ${perColour[c]} Pins, not a multiple of Capacity ${L.capacity}.`);
+    pins.forEach(p => { if (p.coveredBy.includes(p.part)) errors.push(`Pin ${p.id} is covered by its own Part.`); });
+    // Covering must have no cycles, or some Pins could never be freed.
+    const covers = parts.map(() => new Set());
+    pins.forEach(p => p.coveredBy.forEach(q => covers[q].add(p.part)));
+    const state = parts.map(() => 0);
+    const visit = i => { if (state[i] === 1) return true; if (state[i] === 2) return false; state[i] = 1; for (const j of covers[i]) if (visit(j)) return true; state[i] = 2; return false; };
+    if (parts.some((_, i) => visit(i))) errors.push('Parts cover each other in a loop, so some Pins can never be freed.');
+    const pinIndex = Object.fromEntries(pins.map(p => [p.id, p.index]));
+    const pinsOfPart = parts.map((_, i) => pins.filter(p => p.part === i).map(p => p.index));
+    const pinClass = pins.map(p => `${p.colour}/${p.part}/${p.coveredBy.join(',')}`);
+    return {
+      name: L.name || 'Level', boxes: L.boxes, capacity: L.capacity, bufferSize: L.bufferSize, seed: L.seed, rule: L.rule,
+      parts, pins, colours, perColour, errors, pinIndex, pinsOfPart, pinClass,
+      coversParts: covers.map(s => [...s]),
+    };
+  }
+
+  // Short-hand for hand-made levels: parts: [{ name, pins: 'R R B', under: ['Bonnet'] }]
+  function build(spec) {
+    const names = spec.parts.map(p => p.name);
+    return makeLevel(Object.assign({}, spec, {
+      parts: spec.parts.map(p => ({
+        name: p.name, layer: p.layer,
+        pins: p.pins.trim().split(/\s+/).map(letter => ({ colour: BY_LETTER[letter], coveredBy: (p.under || []).map(n => names.indexOf(n)) })),
+      })),
+    }));
+  }
+
+  // ---- State -------------------------------------------------------
+  function initialState(level) {
+    const st = {
+      removed: level.pins.map(() => false),
+      partLeft: level.pinsOfPart.map(a => a.length),
+      buffer: [], boxes: [], picks: 0, closes: 0, status: 'playing',
+    };
+    const events = [];
+    for (let i = 0; i < level.boxes; i++) {
+      const c = pickColour(level, st);
+      st.boxes.push({ colour: c, fill: 0 });
+    }
+    events.push({ kind: 'new', text: 'Opening Boxes: ' + st.boxes.map(b => b.colour === null ? 'grey' : COLOURS[b.colour].name).join(', ') + '.' });
+    return { state: st, events };
+  }
+  function clone(st) {
+    return { removed: st.removed.slice(), partLeft: st.partLeft.slice(), buffer: st.buffer.slice(), boxes: st.boxes.map(b => ({ colour: b.colour, fill: b.fill })), picks: st.picks, closes: st.closes, status: st.status };
+  }
+  function blockersOf(level, st, i) { return level.pins[i].coveredBy.filter(p => st.partLeft[p] > 0); }
+  function isBlocked(level, st, i) { return blockersOf(level, st, i).length > 0; }
+  function legalTaps(level, st) {
+    if (st.status !== 'playing') return [];
+    const out = [];
+    for (let i = 0; i < level.pins.length; i++) if (!st.removed[i] && !isBlocked(level, st, i)) out.push(i);
+    return out;
+  }
+  function pinsLeft(level, st) {
+    const left = {};
+    level.colours.forEach(c => left[c] = 0);
+    level.pins.forEach((p, i) => { if (!st.removed[i]) left[p.colour]++; });
+    st.buffer.forEach(c => left[c]++);
+    return left;
+  }
+
+  // The replacement-colour rule. A colour qualifies if it still has Pins left
+  // (on the Model, Blocked or not, or in the Buffer) and no open Box.
+  function qualifying(level, st) {
+    const left = pinsLeft(level, st);
+    const open = new Set(st.boxes.filter(b => b.colour !== null).map(b => b.colour));
+    let q = level.colours.filter(c => left[c] > 0 && !open.has(c));
+    if (level.rule === 'buffer-first') {
+      const inBuf = q.filter(c => st.buffer.includes(c));
+      if (inBuf.length) q = inBuf;
+    } else if (level.rule === 'reachable-first') {
+      const reach = q.filter(c => st.buffer.includes(c) || level.pins.some((p, i) => p.colour === c && !st.removed[i] && !isBlocked(level, st, i)));
+      if (reach.length) q = reach;
+    }
+    return q;
+  }
+  // Dev option: what this Box would be replaced by if it closed right now.
+  // Only a forecast: the real choice is made at close time, on the state then.
+  function previewNext(level, st, slot) {
+    const t = clone(st);
+    t.boxes[slot] = { colour: null, fill: 0 };
+    return pickColour(level, t);
+  }
+  function pickColour(level, st) {
+    const q = qualifying(level, st);
+    const k = st.picks++;
+    if (!q.length) return null;
+    return q[hash32(level.seed, k) % q.length];
+  }
+
+  const cn = c => COLOURS[c].name;
+
+  function closeBox(level, st, slot, ev) {
+    const old = st.boxes[slot].colour;
+    st.closes++;
+    st.boxes[slot] = { colour: null, fill: 0 }; // the closed Box leaves before the next colour is chosen
+    const c = pickColour(level, st);
+    st.boxes[slot] = { colour: c, fill: 0 };
+    ev.push({ kind: 'close', text: `${cn(old)} Box full: it closes.` });
+    if (c === null) { ev.push({ kind: 'grey', text: 'No colour qualifies, so a grey Box slides in.' }); return; }
+    ev.push({ kind: 'new', text: `New Box slides in: ${cn(c)}.` });
+    drain(level, st, slot, ev);
+  }
+  function drain(level, st, slot, ev) {
+    const box = st.boxes[slot];
+    let moved = 0;
+    while (box.fill < level.capacity) {
+      const j = st.buffer.indexOf(box.colour);
+      if (j < 0) break;
+      st.buffer.splice(j, 1);
+      box.fill++; moved++;
+    }
+    if (moved) ev.push({ kind: 'drain', text: `${moved} ${cn(box.colour)} Pin${moved > 1 ? 's drain' : ' drains'} from the Buffer into it (${box.fill}/${level.capacity}).` });
+    if (box.fill === level.capacity) closeBox(level, st, slot, ev);
+  }
+
+  // The one player action. Returns { state, events, error }; never mutates its input.
+  function tap(level, st0, pinRef) {
+    const i = typeof pinRef === 'number' ? pinRef : level.pinIndex[pinRef];
+    const pin = level.pins[i];
+    if (!pin) return { state: st0, events: [], error: `There is no Pin called ${pinRef}.` };
+    if (st0.status !== 'playing') return { state: st0, events: [], error: `The level is already ${st0.status === 'won' ? 'won' : 'over'}. Undo or restart to keep playing.` };
+    if (st0.removed[i]) return { state: st0, events: [], error: `Pin ${pin.id} has already been removed.` };
+    const blockers = blockersOf(level, st0, i);
+    if (blockers.length) return { state: st0, events: [], error: `Pin ${pin.id} is Blocked by ${blockers.map(b => level.parts[b].name).join(' and ')}. Nothing happens.` };
+
+    const st = clone(st0);
+    const ev = [];
+    st.removed[i] = true;
+    ev.push({ kind: 'remove', text: `Removed ${cn(pin.colour)} Pin ${pin.id} from ${level.parts[pin.part].name}.` });
+    st.partLeft[pin.part]--;
+    if (st.partLeft[pin.part] === 0) {
+      const freed = level.pins.filter(p => !st.removed[p.index] && p.coveredBy.includes(pin.part) && !isBlocked(level, st, p.index)).map(p => p.id);
+      ev.push({ kind: 'fall', text: `${level.parts[pin.part].name} has no Pins left and falls away.` + (freed.length ? ` Now free: ${freed.join(', ')}.` : '') });
+    }
+    const slot = st.boxes.findIndex(b => b.colour === pin.colour);
+    if (slot >= 0) {
+      const box = st.boxes[slot];
+      box.fill++;
+      ev.push({ kind: 'box', text: `It goes into the ${cn(pin.colour)} Box (${box.fill}/${level.capacity}).` });
+      if (box.fill === level.capacity) closeBox(level, st, slot, ev);
+    } else {
+      st.buffer.push(pin.colour);
+      ev.push({ kind: 'buffer', text: `No ${cn(pin.colour)} Box is open, so it goes to the Buffer (${st.buffer.length}/${level.bufferSize}).` });
+      // Decided 2026-11-15: the level is lost the moment the Buffer's last slot fills.
+      if (st.buffer.length >= level.bufferSize) {
+        st.status = 'lost';
+        ev.push({ kind: 'lose', text: 'That filled the last Buffer slot. Level lost.' });
+        return { state: st, events: ev };
+      }
+    }
+    if (st.removed.every(Boolean)) {
+      if (st.buffer.length === 0) { st.status = 'won'; ev.push({ kind: 'win', text: 'Every Pin removed. Level won!' }); }
+      else { st.status = 'stuck'; ev.push({ kind: 'lose', text: 'RULE BUG: the Model is empty but Pins are stuck in the Buffer.' }); }
+    }
+    return { state: st, events: ev };
+  }
+
+  // ---- Solver: first-win depth-first search, remembering dead positions --
+  function stateKey(st) {
+    let r = '';
+    for (const x of st.removed) r += x ? '1' : '0';
+    return r + '|' + st.buffer.slice().sort((a, b) => a - b).join(',') + '|' + st.boxes.map(b => b.colour + ':' + b.fill).sort().join(',') + '|' + st.closes;
+  }
+  const BUDGET = {};
+  function solve(level, from, budget = 200000) {
+    const start = from || initialState(level).state;
+    const dead = new Set();
+    let nodes = 0;
+    const path = [];
+    function dfs(st) {
+      if (st.status === 'won') return true;
+      if (st.status !== 'playing') return false;
+      const key = stateKey(st);
+      if (dead.has(key)) return false;
+      if (++nodes > budget) throw BUDGET;
+      const tried = new Set();
+      for (const i of legalTaps(level, st)) {
+        const cls = level.pinClass[i];
+        if (tried.has(cls)) continue; // same colour, same Part, same covering: interchangeable
+        tried.add(cls);
+        if (dfs(tap(level, st, i).state)) { path.push(i); return true; }
+      }
+      dead.add(key);
+      return false;
+    }
+    try {
+      const ok = dfs(start);
+      return { verdict: ok ? 'winnable' : 'unwinnable', nodes, path: path.reverse() };
+    } catch (e) {
+      if (e === BUDGET) return { verdict: 'unknown', nodes };
+      throw e;
+    }
+  }
+
+  // ---- Random tapping: how forgiving is the level? ---------------------
+  function playouts(level, n = 300, seed = 1) {
+    let wins = 0, maxBufSum = 0;
+    const start = initialState(level).state;
+    for (let k = 0; k < n; k++) {
+      const r = rng(hash32(seed, k));
+      let st = start, maxBuf = 0;
+      while (st.status === 'playing') {
+        const L = legalTaps(level, st);
+        st = tap(level, st, L[Math.floor(r() * L.length)]).state;
+        maxBuf = Math.max(maxBuf, st.buffer.length);
+      }
+      if (st.status === 'won') wins++; else maxBuf = level.bufferSize;
+      maxBufSum += maxBuf;
+    }
+    return { winRate: wins / n, meanMaxBuffer: maxBufSum / n };
+  }
+
+  // ---- Throwaway generator: random layered Model -----------------------
+  function generate(o) {
+    const r = rng(hash32(o.seed, 7919));
+    const pick = a => a[Math.floor(r() * a.length)];
+    const colours = [];
+    for (let c = 0; c < o.colours; c++) for (let k = 0; k < o.perColour; k++) colours.push(c);
+    for (let i = colours.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [colours[i], colours[j]] = [colours[j], colours[i]]; }
+    const sizes = [];
+    let left = colours.length;
+    while (left > 0) {
+      let s = 2 + Math.floor(r() * 4);
+      if (s > left) s = left;
+      if (left - s === 1) s++;
+      sizes.push(s); left -= s;
+    }
+    const layers = Math.max(1, Math.min(o.layers, sizes.length));
+    const parts = sizes.map((_, i) => ({ layer: Math.floor(i * layers / sizes.length), pins: [] }));
+    const counter = {};
+    parts.forEach(p => { counter[p.layer] = (counter[p.layer] || 0) + 1; p.name = `${LAYER_NAMES[p.layer] || 'Layer' + p.layer} ${counter[p.layer]}`; });
+    let n = 0;
+    parts.forEach((p, i) => {
+      const above = parts.map((q, j) => j).filter(j => parts[j].layer === p.layer - 1);
+      let coverers = [];
+      if (above.length) {
+        coverers = [pick(above)];
+        if (above.length > 1 && r() < 0.5) { const b = pick(above); if (!coverers.includes(b)) coverers.push(b); }
+      }
+      for (let k = 0; k < sizes[i]; k++) {
+        let cov = coverers.filter(() => r() < 0.7);
+        if (coverers.length && !cov.length) cov = [pick(coverers)];
+        p.pins.push({ colour: colours[n++], coveredBy: cov });
+      }
+    });
+    return makeLevel({ name: `Generated (seed ${o.seed})`, boxes: o.boxes, capacity: o.capacity, bufferSize: o.bufferSize, seed: o.seed, rule: o.rule, parts });
+  }
+
+  return { COLOURS, DEFAULTS, makeLevel, build, initialState, tap, legalTaps, isBlocked, blockersOf, pinsLeft, qualifying, solve, playouts, generate, hash32, previewNext };
+})();
+</script>
+
+<script id="scenarios">
+// Hand-made levels for the guided walkthroughs. Steps were checked against the rules module.
+var SCENARIOS = [
+  {
+    title: 'Happy path',
+    level: { name: 'Happy path', boxes: 2, seed: 1, parts: [
+      { name: 'Roof', pins: 'R R R B B B R R R' },
+    ] },
+    text: 'Two Boxes, two colours, nothing covered. Fill the Red Box and watch it close. Red still has Pins left, so the next Box is Red again. When Blue closes, no colour qualifies (Red already has its Box), so a grey Box slides in. Grey Boxes are the normal end of a level.',
+    steps: [
+      { tap: 'R1' }, { tap: 'R2' }, { tap: 'R3', note: 'Red Box closes, and a new Red Box replaces it.' },
+      { tap: 'B1' }, { tap: 'B2' }, { tap: 'B3', note: 'Blue closes. Grey slides in.' },
+      { tap: 'R4' }, { tap: 'R5' }, { tap: 'R6', note: 'Both Boxes grey, level won.' },
+    ],
+  },
+  {
+    title: 'Buffer and drain',
+    level: { name: 'Buffer and drain', boxes: 2, seed: 5, parts: [
+      { name: 'Bonnet', pins: 'R R R G G G B B B' },
+    ] },
+    text: 'Two Boxes, three colours, so one colour always waits. With this seed the opening Boxes are Red and Blue. Green goes to the Buffer. When Red closes, Green is the only colour that qualifies, so the new Box is Green and the Buffered Pins drain into it.',
+    steps: [
+      { tap: 'G1', note: 'No Green Box, so it goes to the Buffer.' }, { tap: 'G2' },
+      { tap: 'R1' }, { tap: 'R2' }, { tap: 'R3', note: 'Red closes, Green slides in, and 2 Green Pins drain in.' },
+      { tap: 'G3', note: 'Green closes. Grey.' },
+      { tap: 'B1' }, { tap: 'B2' }, { tap: 'B3', note: 'Win.' },
+    ],
+  },
+  {
+    title: 'Chain of drains',
+    level: { name: 'Chain of drains', boxes: 2, seed: 1, parts: [
+      { name: 'Door', pins: 'R R R B B B G G G Y Y Y' },
+    ] },
+    text: 'Park all of Green and all of Yellow in the Buffer (6 of 7 slots). Closing Red then sets off a chain: the new Box fills straight from the Buffer and closes, the next one does the same, and the slot ends grey. That is one tap causing three Box closes.',
+    steps: [
+      { tap: 'G1' }, { tap: 'G2' }, { tap: 'G3' }, { tap: 'Y1' }, { tap: 'Y2' }, { tap: 'Y3', note: 'Buffer holds 6.' },
+      { tap: 'R1' }, { tap: 'R2' }, { tap: 'R3', note: 'Watch: Red closes, then two Boxes fill and close from the Buffer, then grey.' },
+      { tap: 'B1' }, { tap: 'B2' }, { tap: 'B3' },
+    ],
+  },
+  {
+    title: 'Losing on overflow',
+    level: { name: 'Losing on overflow', boxes: 2, bufferSize: 3, seed: 1, parts: [
+      { name: 'Seat', pins: 'R R R B B B G G G Y Y Y' },
+    ] },
+    text: 'This level overrides the Buffer size to 3 to keep things short. You lose the moment a Pin fills the last Buffer slot, so a Buffer of 3 can safely hold only 2. Then undo and see that the same position can still be won.',
+    steps: [
+      { tap: 'G1' }, { tap: 'Y1', note: 'Buffer 2/3. One slot left.' },
+      { tap: 'G2', note: 'This Pin fills the last slot. Lost.' },
+      { tap: 'R1', note: 'Tapping after a loss is refused.' },
+      { undo: true, note: 'Undo the losing tap.' },
+      { tap: 'R1' }, { tap: 'R2' }, { tap: 'R3', note: 'Red closes. The next Box drains one of the Buffered Pins.' },
+    ],
+  },
+  {
+    title: 'Blocked Pins',
+    level: { name: 'Blocked Pins', boxes: 5, seed: 1, parts: [
+      { name: 'Bonnet', pins: 'R R' },
+      { name: 'Engine', pins: 'B B B R', under: ['Bonnet'] },
+    ] },
+    text: 'Bonnet covers every Pin on Engine. Blocked Pins cannot be tapped. When Bonnet loses its last Pin it falls away and the Engine Pins are freed. This level has only 2 colours for 5 Boxes, so 3 Boxes are grey from the start.',
+    steps: [
+      { tap: 'B1', note: 'Blocked. Refused, and nothing changes.' },
+      { tap: 'R1' }, { tap: 'R2', note: 'Bonnet falls away. Engine is free.' },
+      { tap: 'R3' }, { tap: 'B1' }, { tap: 'B2' }, { tap: 'B3' },
+    ],
+  },
+  {
+    title: 'Is the colour rule fair?',
+    level: { name: 'Buried colour', boxes: 2, bufferSize: 3, seed: 5, parts: [
+      { name: 'Roof', pins: 'R R R G G G' },
+      { name: 'Cabin', pins: 'B B B Y Y Y', under: ['Roof'] },
+    ] },
+    text: 'Blue and Yellow sit under the Roof. Under the rule as written, the opening Boxes can be colours you cannot reach yet. Here they are Blue and Yellow, so every reachable Pin has to go to the Buffer, which is only 3 slots. Play it, then switch "Next-colour rule" (in Level and numbers) to "Prefer colours you can reach now", press New level to see the difference on random levels, and compare the stats.',
+    steps: [
+      { tap: 'R1', note: 'No Box for Red: Buffer.' }, { tap: 'R2' },
+      { tap: 'R3', note: 'Fills the Buffer: lost on the 3rd tap. No tap order can win this level.' },
+    ],
+  },
+];
+</script>
+
+<script>
+// ===================== Throwaway page shell =====================
+const $ = id => document.getElementById(id);
+const C = Rules.COLOURS;
+let level, history, lastEvents, hintPin = null, wt = null; // wt = { s, step }
+
+function load(lvl) {
+  level = lvl;
+  const init = Rules.initialState(level);
+  history = [init.state];
+  lastEvents = level.errors.length ? level.errors.map(t => ({ kind: 'error', text: 'Level problem: ' + t })).concat(init.events) : init.events;
+  hintPin = null; $('checkOut').textContent = '';
+  render();
+}
+const cur = () => history[history.length - 1];
+
+function doTap(ref) {
+  const r = Rules.tap(level, cur(), ref);
+  hintPin = null; $('checkOut').textContent = '';
+  if (r.error) lastEvents = [{ kind: 'error', text: r.error }];
+  else { history.push(r.state); lastEvents = r.events; }
+  render();
+}
+function doUndo() {
+  if (history.length > 1) { history.pop(); lastEvents = [{ kind: 'new', text: 'Undone. Back one tap.' }]; }
+  else lastEvents = [{ kind: 'error', text: 'Nothing to undo.' }];
+  hintPin = null; render();
+}
+
+function preview(st, b) {
+  if (!$('dev-preview').checked) return '';
+  const n = Rules.previewNext(level, st, st.boxes.indexOf(b));
+  return `<div class="meta" style="font-size:11px;color:#666">next: ${n === null ? 'grey' : C[n].name}</div>`;
+}
+$('dev-preview').onchange = () => render();
+const swatch = c => `--c:${C[c].hex};--t:${C[c].dark ? '#1c1c22' : '#fff'}`;
+
+function render() {
+  const st = cur();
+  const s = $('status');
+  s.className = 'status ' + st.status;
+  s.textContent = { playing: `Playing: ${level.name}. ${Rules.legalTaps(level, st).length} Pins can be tapped. Taps so far: ${history.length - 1}.`, won: 'Won: every Pin removed.', lost: 'Lost: a Pin arrived at a full Buffer.', stuck: 'Rule bug: stuck.' }[st.status];
+
+  $('boxes').innerHTML = st.boxes.map(b => b.colour === null
+    ? `<div class="box grey"><div class="name">Grey</div><div class="dots" style="color:#999">no colour</div></div>`
+    : `<div class="box" style="${swatch(b.colour)}"><div class="name">${C[b.colour].name}</div><div class="dots">${'●'.repeat(b.fill)}${'○'.repeat(level.capacity - b.fill)}</div>${preview(st, b)}</div>`).join('');
+
+  $('bufferLabel').textContent = `Buffer (${st.buffer.length}/${level.bufferSize})`;
+  let buf = '';
+  for (let i = 0; i < level.bufferSize; i++) {
+    const c = st.buffer[i];
+    buf += c === undefined ? '<div class="slot"></div>' : `<div class="slot full" style="${swatch(c)}">${C[c].letter}</div>`;
+  }
+  $('buffer').innerHTML = buf;
+
+  const left = Rules.pinsLeft(level, st);
+  $('counts').innerHTML = level.colours.map(c => `<span style="border-color:${C[c].hex}">${C[c].name}: ${left[c]}</span>`).join('');
+
+  $('events').innerHTML = lastEvents.map(e => `<li class="${e.kind}">${e.text}</li>`).join('');
+  $('undo').disabled = history.length < 2;
+
+  const layers = [...new Set(level.parts.map(p => p.layer))].sort((a, b) => a - b);
+  $('model').innerHTML = layers.map(l => `<div class="layer"><div class="label">Layer ${l + 1}${l === 0 ? ' (outermost)' : ''}</div><div class="parts">` +
+    level.parts.filter(p => p.layer === l).map(p => {
+      const fallen = st.partLeft[p.index] === 0;
+      const covers = level.coversParts[p.index].map(i => level.parts[i].name);
+      const under = [...new Set(level.pinsOfPart[p.index].flatMap(i => level.pins[i].coveredBy))].map(i => level.parts[i].name);
+      const pins = level.pinsOfPart[p.index].map(i => {
+        const pin = level.pins[i];
+        const removed = st.removed[i];
+        const bl = Rules.blockersOf(level, st, i);
+        const cls = removed ? 'removed' : bl.length ? 'blocked' : '';
+        const title = removed ? 'removed' : bl.length ? 'Blocked by ' + bl.map(b => level.parts[b].name).join(', ') : 'tap to remove';
+        return `<button class="pin ${cls} ${hintPin === i ? 'hint' : ''}" style="${swatch(pin.colour)}" data-pin="${i}" title="${pin.id}: ${title}">${pin.id}</button>`;
+      }).join('');
+      return `<div class="part ${fallen ? 'fallen' : ''}"><h3>${p.name}${fallen ? ' (fallen away)' : ''}</h3>
+        <div class="meta">${under.length ? 'under ' + under.join(', ') : 'nothing on top'}${covers.length ? ' · covers ' + covers.join(', ') : ''}</div>
+        <div class="pins">${pins}</div></div>`;
+    }).join('') + '</div></div>').join('');
+
+  renderScenario();
+}
+
+$('model').addEventListener('click', e => { const b = e.target.closest('[data-pin]'); if (b) doTap(+b.dataset.pin); });
+$('undo').onclick = doUndo;
+$('restart').onclick = () => { load(level); if (wt) { wt.step = 0; render(); } };
+$('hint').onclick = () => {
+  const r = Rules.solve(level, cur(), 100000);
+  if (r.verdict === 'winnable' && r.path.length) { hintPin = r.path[0]; $('checkOut').innerHTML = `<span class="good">Tapping ${level.pins[hintPin].id} keeps a win possible (highlighted).</span>`; }
+  else if (r.verdict === 'unknown') $('checkOut').innerHTML = `<span class="meh">The solver gave up after ${r.nodes} positions.</span>`;
+  else $('checkOut').innerHTML = `<span class="bad">No winning tap from here.</span>`;
+  render();
+};
+$('check').onclick = () => {
+  const r = Rules.solve(level, cur(), 200000);
+  $('checkOut').innerHTML = r.verdict === 'winnable' ? `<span class="good">Yes. A winning order exists from here (found after ${r.nodes} positions).</span>`
+    : r.verdict === 'unwinnable' ? `<span class="bad">No. Every tap order from here loses (${r.nodes} positions checked).</span>`
+    : `<span class="meh">Unknown. Gave up after ${r.nodes} positions.</span>`;
+};
+
+// ---- Walkthroughs ----
+function renderTabs() {
+  $('tabs').innerHTML = SCENARIOS.map((s, i) => `<button data-s="${i}" class="${wt && wt.s === i ? 'on' : ''}">${s.title}</button>`).join('');
+}
+$('tabs').addEventListener('click', e => { const b = e.target.closest('[data-s]'); if (!b) return; startScenario(+b.dataset.s); });
+function startScenario(i) {
+  wt = { s: i, step: 0 };
+  load(Rules.build(SCENARIOS[i].level));
+  renderTabs();
+}
+function renderScenario() {
+  if (!wt) { $('scenario').innerHTML = '<p class="intro">Choose a walkthrough. Each one loads a small hand-made level and resets it, so it runs the same way every time. You can tap Pins freely at any point.</p>'; return; }
+  const s = SCENARIOS[wt.s];
+  $('scenario').innerHTML = `<p>${s.text}</p><ol class="steps">` + s.steps.map((st, k) => {
+    const label = st.undo ? '↶ Undo' : `Tap ${st.tap}`;
+    const cls = k < wt.step ? 'done' : k === wt.step ? 'next' : '';
+    return `<li><button data-step="${k}" class="${cls}" ${k === wt.step ? '' : 'disabled'}>${k + 1}. ${label}</button><span class="note">${st.note || ''}</span></li>`;
+  }).join('') + `</ol><div class="row" style="margin-top:10px"><button id="wtRestart">Restart this walkthrough</button></div>`;
+  $('wtRestart').onclick = () => startScenario(wt.s);
+}
+$('scenario').addEventListener('click', e => {
+  const b = e.target.closest('[data-step]'); if (!b) return;
+  const st = SCENARIOS[wt.s].steps[+b.dataset.step];
+  wt.step++;
+  st.undo ? doUndo() : doTap(st.tap);
+});
+
+// ---- Level generator, stats, sweep ----
+function readForm() {
+  return { boxes: +$('f-boxes').value, capacity: +$('f-cap').value, bufferSize: +$('f-buf').value, colours: +$('f-col').value,
+    perColour: +$('f-per').value || +$('f-cap').value * 2, layers: +$('f-lay').value, seed: +$('f-seed').value, rule: $('f-rule').value };
+}
+function fillPer() {
+  const cap = +$('f-cap').value, old = +$('f-per').value;
+  $('f-per').innerHTML = [1, 2, 3].map(k => `<option value="${cap * k}" ${cap * k === old || (!old && k === 2) ? 'selected' : ''}>${cap * k}</option>`).join('');
+}
+$('f-cap').oninput = fillPer; fillPer();
+$('gen').onclick = () => { wt = null; renderTabs(); load(Rules.generate(readForm())); $('statsOut').textContent = ''; };
+$('stats').onclick = () => {
+  $('statsOut').textContent = 'Checking…';
+  setTimeout(() => {
+    const t0 = performance.now();
+    const s = Rules.solve(level, null, 300000);
+    const p = Rules.playouts(level, 300, 1);
+    const v = s.verdict === 'winnable' ? '<span class="good">winnable</span>' : s.verdict === 'unwinnable' ? '<span class="bad">CANNOT be won</span>' : '<span class="meh">not proven (solver gave up)</span>';
+    $('statsOut').innerHTML = `${level.pins.length} Pins, ${level.colours.length} colours, ${level.parts.length} Parts, ${level.boxes} Boxes, Buffer ${level.bufferSize}, rule "${level.rule}".
+Solver: ${v} (${s.nodes} positions searched).
+Random tapping: wins ${(p.winRate * 100).toFixed(0)}% of 300 games. Fullest Buffer on average: ${p.meanMaxBuffer.toFixed(1)} (a loss counts as ${level.bufferSize}).
+Rough reading: 100% = trivial, 20–80% = forgiving, 1–20% = needs thought, 0% but winnable = needs real planning.
+(${Math.round(performance.now() - t0)} ms)`;
+  }, 20);
+};
+$('sweep').onclick = () => {
+  const f = readForm();
+  const colourRange = [4, 5, 6, 7, 8, 9, 10, 11, 12].filter(c => c <= 13);
+  const boxRange = [3, 4, 5];
+  const seeds = [1, 2, 3, 4, 5, 6];
+  const rows = [];
+  const out = $('sweepOut');
+  let ci = 0;
+  out.innerHTML = 'Running…';
+  function step() {
+    const c = colourRange[ci];
+    const cells = boxRange.map(b => {
+      let win = 0, unknown = 0, rate = 0;
+      for (const sd of seeds) {
+        const L = Rules.generate(Object.assign({}, f, { colours: c, boxes: b, seed: sd }));
+        const s = Rules.solve(L, null, 30000);
+        if (s.verdict === 'winnable') win++; else if (s.verdict === 'unknown') unknown++;
+        rate += Rules.playouts(L, 80, sd).winRate;
+      }
+      return `${win}/${seeds.length}${unknown ? ` (${unknown}?)` : ''} · ${(rate / seeds.length * 100).toFixed(0)}%`;
+    });
+    rows.push(`<tr><td>${c} colours (${c * f.perColour} Pins)</td>${cells.map(x => `<td>${x}</td>`).join('')}</tr>`);
+    out.innerHTML = `<table><tr><th>Buffer ${f.bufferSize}, rule "${f.rule}", ${f.layers} layers</th>${boxRange.map(b => `<th>${b} Boxes</th>`).join('')}</tr>${rows.join('')}</table>
+<div class="label">Each cell: random levels the solver proved winnable / ${seeds.length} ("?" = solver gave up) · share of random tap orders that win.</div>${ci < colourRange.length - 1 ? 'Running…' : ''}`;
+    if (++ci < colourRange.length) setTimeout(step, 10);
+  }
+  setTimeout(step, 10);
+};
+
+renderTabs();
+load(Rules.generate(readForm()));
+</script>
+</body>
+</html>
