@@ -39,10 +39,9 @@ A buildable spec for the **first playable version**: the full Box/Buffer sorting
 
 ## Not yet specified
 
-- **Screen layout and HUD look:** sizing of the Box row and Buffer (drawn in the scene in world units, per Tech stack) on small phones, safe areas, colours readable to colour-blind players (shape or pattern on Pins?).
-- **Gesture tuning:** hold threshold for Peek versus tap versus drag, and the size of tap targets on small Pins. Probably needs testing on a real device once a stack exists.
-- **PWA specifics:** offline caching (likely `vite-plugin-pwa` on the Vite build), hosting, update flow, iOS home-screen quirks.
-- **Sound:** whether any sound makes it into the first version, and its source.
+<!-- 2026-11-15: all fog graduated into tickets. Screen layout and HUD look became Screen layout and HUD plus Pin colours and colour-blind readability. Gesture tuning became Gesture tuning. PWA specifics became PWA facts for Vite and iOS plus PWA hosting, caching and updates. Sound became Sound in the first version. -->
+
+Nothing left in the fog. The remaining decisions are open tickets.
 
 ## Out of scope
 
