@@ -11,7 +11,7 @@ export interface Rect {
 export interface HudLayout {
   boxes: Rect[];
   /** Hole rects inside each Box, row-major: ⌈Capacity/2⌉ on top. */
-  boxSlots: Rect[][];
+  boxHoles: Rect[][];
   buffer: Rect;
   bufferSlots: Rect[];
   /** Where the Model is drawn. */
@@ -23,7 +23,7 @@ export const HUD = {
   boxGap: 10,
   rowGap: 8,
   boxPad: 6,
-  maxSlot: 46,
+  maxHole: 46,
   maxBufferSlot: 52,
   bottomBar: 48,
 } as const;
@@ -39,7 +39,7 @@ export function hudLayout(
   const avail = width - 2 * margin;
   const boxW = Math.min(
     (avail - (rules.boxes - 1) * boxGap) / rules.boxes,
-    cols * HUD.maxSlot + 2 * boxPad,
+    cols * HUD.maxHole + 2 * boxPad,
   );
   const slot = (boxW - 2 * boxPad) / cols;
   const boxH = rows * slot + 2 * boxPad;
@@ -47,7 +47,7 @@ export function hudLayout(
   const top = margin;
 
   const boxes: Rect[] = [];
-  const boxSlots: Rect[][] = [];
+  const boxHoles: Rect[][] = [];
   for (let b = 0; b < rules.boxes; b++) {
     const box = { x: (width - rowW) / 2 + b * (boxW + boxGap), y: top, w: boxW, h: boxH };
     boxes.push(box);
@@ -59,7 +59,7 @@ export function hudLayout(
       const rowStart = box.x + (box.w - inRow * slot) / 2;
       holes.push({ x: rowStart + c * slot, y: box.y + boxPad + r * slot, w: slot, h: slot });
     }
-    boxSlots.push(holes);
+    boxHoles.push(holes);
   }
 
   const bSlot = Math.min(HUD.maxBufferSlot, 0.8 * slot, (avail - 2 * boxPad) / rules.bufferSize);
@@ -75,5 +75,5 @@ export function hudLayout(
   const modelTop = buffer.y + buffer.h + margin;
   const modelBottom = height - margin - HUD.bottomBar - margin;
   const model = { x: 0, y: modelTop, w: width, h: Math.max(1, modelBottom - modelTop) };
-  return { boxes, boxSlots, buffer, bufferSlots, model };
+  return { boxes, boxHoles, buffer, bufferSlots, model };
 }

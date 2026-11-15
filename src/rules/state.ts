@@ -29,6 +29,11 @@ export function isBlocked(level: Level, state: State, pin: number): boolean {
   return blockersOf(level, state, pin).length > 0;
 }
 
+/** A Part falls away once its last Pin is out. Cores (no Pins) never fall. */
+export function hasFallen(level: Level, state: State, part: number): boolean {
+  return (level.pinsOfPart[part]?.length ?? 0) > 0 && state.partLeft[part] === 0;
+}
+
 export function legalTaps(level: Level, state: State): number[] {
   if (state.status !== 'playing') return [];
   return level.pins

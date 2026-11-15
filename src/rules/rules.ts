@@ -7,14 +7,15 @@ import type { Box, State, Status } from './state';
 import { blockersOf } from './state';
 
 export type RulesEvent =
-  | { kind: 'pinToBox'; pin: number; slot: number; fill: number }
+  /** `box` is a Box position in the row; `slot` (below) is a Buffer position. */
+  | { kind: 'pinToBox'; pin: number; box: number; fill: number }
   /** `slot` is the Buffer position the Pin lands in. */
   | { kind: 'pinToBuffer'; pin: number; slot: number }
-  | { kind: 'boxClosed'; slot: number; colour: number }
+  | { kind: 'boxClosed'; box: number; colour: number }
   /** `colour: null` is a grey Box. */
-  | { kind: 'boxOpened'; slot: number; colour: number | null }
+  | { kind: 'boxOpened'; box: number; colour: number | null }
   /** `from` lists the Buffer positions (before the drain) that moved into the Box. */
-  | { kind: 'bufferDrained'; slot: number; colour: number; from: number[]; fill: number }
+  | { kind: 'bufferDrained'; box: number; colour: number; from: number[]; fill: number }
   | { kind: 'partFell'; part: number }
   | { kind: 'won' }
   | { kind: 'lost' };
@@ -72,28 +73,28 @@ export function initialState(level: Level): { state: State; events: RulesEvent[]
     status: 'playing',
   };
   const events: RulesEvent[] = [];
-  for (let slot = 0; slot < level.boxes; slot++) {
+  for (let boxIndex = 0; boxIndex < level.boxes; boxIndex++) {
     const colour = pickColour(level, st);
     st.boxes.push({ colour, fill: 0 });
-    events.push({ kind: 'boxOpened', slot, colour });
+    events.push({ kind: 'boxOpened', box: boxIndex, colour });
   }
   return { state: st, events };
 }
 
-function closeBox(level: Level, st: Draft, slot: number, ev: RulesEvent[]): void {
-  const old = st.boxes[slot]?.colour;
-  if (old === undefined || old === null) throw new Error(`Box ${slot} closed without a colour`);
+function closeBox(level: Level, st: Draft, boxIndex: number, ev: RulesEvent[]): void {
+  const old = st.boxes[boxIndex]?.colour;
+  if (old === undefined || old === null) throw new Error(`Box ${boxIndex} closed without a colour`);
   st.closes++;
-  st.boxes[slot] = { colour: null, fill: 0 }; // the closed Box leaves before the next colour is chosen
+  st.boxes[boxIndex] = { colour: null, fill: 0 }; // the closed Box leaves before the next colour is chosen
   const colour = pickColour(level, st);
-  st.boxes[slot] = { colour, fill: 0 };
-  ev.push({ kind: 'boxClosed', slot, colour: old });
-  ev.push({ kind: 'boxOpened', slot, colour });
-  if (colour !== null) drain(level, st, slot, ev);
+  st.boxes[boxIndex] = { colour, fill: 0 };
+  ev.push({ kind: 'boxClosed', box: boxIndex, colour: old });
+  ev.push({ kind: 'boxOpened', box: boxIndex, colour });
+  if (colour !== null) drain(level, st, boxIndex, ev);
 }
 
-function drain(level: Level, st: Draft, slot: number, ev: RulesEvent[]): void {
-  const box = st.boxes[slot];
+function drain(level: Level, st: Draft, boxIndex: number, ev: RulesEvent[]): void {
+  const box = st.boxes[boxIndex];
   if (!box || box.colour === null) return;
   const colour = box.colour;
   const from: number[] = [];
@@ -103,9 +104,9 @@ function drain(level: Level, st: Draft, slot: number, ev: RulesEvent[]): void {
   if (from.length) {
     st.buffer = st.buffer.filter((_, i) => !from.includes(i));
     box.fill += from.length;
-    ev.push({ kind: 'bufferDrained', slot, colour, from, fill: box.fill });
+    ev.push({ kind: 'bufferDrained', box: boxIndex, colour, from, fill: box.fill });
   }
-  if (box.fill === level.capacity) closeBox(level, st, slot, ev);
+  if (box.fill === level.capacity) closeBox(level, st, boxIndex, ev);
 }
 
 /** The one player action. Never mutates its input. */
@@ -124,12 +125,12 @@ export function tap(level: Level, st0: State, pinIndex: number): TapResult {
   st.partLeft[pin.part] = left;
   if (left === 0) ev.push({ kind: 'partFell', part: pin.part });
 
-  const slot = st.boxes.findIndex((b) => b.colour === pin.colour);
-  const box = st.boxes[slot];
+  const boxIndex = st.boxes.findIndex((b) => b.colour === pin.colour);
+  const box = st.boxes[boxIndex];
   if (box) {
     box.fill++;
-    ev.push({ kind: 'pinToBox', pin: pinIndex, slot, fill: box.fill });
-    if (box.fill === level.capacity) closeBox(level, st, slot, ev);
+    ev.push({ kind: 'pinToBox', pin: pinIndex, box: boxIndex, fill: box.fill });
+    if (box.fill === level.capacity) closeBox(level, st, boxIndex, ev);
   } else {
     st.buffer.push(pin.colour);
     ev.push({ kind: 'pinToBuffer', pin: pinIndex, slot: st.buffer.length - 1 });

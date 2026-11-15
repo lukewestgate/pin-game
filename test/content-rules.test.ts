@@ -61,7 +61,7 @@ describe('tap, through the content loader', () => {
 
     const result = tap(level, state, LID_B);
 
-    expect(result.events).toEqual([{ kind: 'pinToBox', pin: LID_B, slot: 0, fill: 1 }]);
+    expect(result.events).toEqual([{ kind: 'pinToBox', pin: LID_B, box: 0, fill: 1 }]);
     expect(result.state.boxes).toEqual([{ colour: 1, fill: 1 }]);
     expect(result.state.removed).toEqual([false, true, false, false]);
   });
@@ -99,10 +99,10 @@ describe('tap, through the content loader', () => {
     // Yellow fills and closes; red is the only colour left, so its Box opens and drains.
     const t3 = tap(level, t2.state, BLOCK_B);
     expect(t3.events).toEqual([
-      { kind: 'pinToBox', pin: BLOCK_B, slot: 0, fill: 2 },
-      { kind: 'boxClosed', slot: 0, colour: 1 },
-      { kind: 'boxOpened', slot: 0, colour: 0 },
-      { kind: 'bufferDrained', slot: 0, colour: 0, from: [0], fill: 1 },
+      { kind: 'pinToBox', pin: BLOCK_B, box: 0, fill: 2 },
+      { kind: 'boxClosed', box: 0, colour: 1 },
+      { kind: 'boxOpened', box: 0, colour: 0 },
+      { kind: 'bufferDrained', box: 0, colour: 0, from: [0], fill: 1 },
     ]);
     expect(t3.state.buffer).toEqual([]);
 
@@ -110,9 +110,9 @@ describe('tap, through the content loader', () => {
     const t4 = tap(level, t3.state, BLOCK_A);
     expect(t4.events).toEqual([
       { kind: 'partFell', part: BLOCK },
-      { kind: 'pinToBox', pin: BLOCK_A, slot: 0, fill: 2 },
-      { kind: 'boxClosed', slot: 0, colour: 0 },
-      { kind: 'boxOpened', slot: 0, colour: null },
+      { kind: 'pinToBox', pin: BLOCK_A, box: 0, fill: 2 },
+      { kind: 'boxClosed', box: 0, colour: 0 },
+      { kind: 'boxOpened', box: 0, colour: null },
       { kind: 'won' },
     ]);
     expect(t4.state.status).toBe('won');
@@ -133,7 +133,7 @@ describe('undo', () => {
     expect(history.present).toEqual(state);
     expect(canUndo(history)).toBe(false);
     expect(tap(level, history.present, LID_B).events).toEqual([
-      { kind: 'pinToBox', pin: LID_B, slot: 0, fill: 1 },
+      { kind: 'pinToBox', pin: LID_B, box: 0, fill: 1 },
     ]);
   });
 

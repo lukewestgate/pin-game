@@ -3,7 +3,7 @@
 // it never decides outcomes. Snaps with no animation until the Timeline (ticket 25).
 import type { LoadedLevel } from '../content/loader';
 import { CANDY } from '../content/palette';
-import type { State } from '../rules/state';
+import { hasFallen, type State } from '../rules/state';
 import { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera.pure';
 import { Camera } from '@babylonjs/core/Cameras/camera.pure';
 import { FreeCamera } from '@babylonjs/core/Cameras/freeCamera.pure';
@@ -144,7 +144,7 @@ export function createGameView(engine: AbstractEngine, level: LoadedLevel): Game
       if (!rect) return;
       const tint = box.colour === null ? GREY_BOX : (CANDY[box.colour] ?? GREY_BOX);
       hudPlane(`box-${b}`, rect, 0, scaled(tint, 0.92));
-      layout.boxSlots[b]?.forEach((hole, i) => {
+      layout.boxHoles[b]?.forEach((hole, i) => {
         hudPlane(`box-${b}-hole-${i}`, hole, -1, scaled(tint, 0.42), 0.9);
         if (i < box.fill) hudPin(`box-${b}-pin-${i}`, hole, tint, 0.78);
       });
@@ -159,10 +159,7 @@ export function createGameView(engine: AbstractEngine, level: LoadedLevel): Game
 
   function draw(state: State): void {
     pinMeshes.forEach((mesh, i) => mesh.setEnabled(!state.removed[i]));
-    model.parts.forEach((node, p) => {
-      const hasPins = (level.pinsOfPart[p]?.length ?? 0) > 0;
-      node.setEnabled(!hasPins || (state.partLeft[p] ?? 0) > 0);
-    });
+    model.parts.forEach((node, p) => node.setEnabled(!hasFallen(level, state, p)));
     drawHud(state);
   }
 
