@@ -22,4 +22,6 @@ The human's inspiration is **Screwdom 3D**. The first playable takes on the *qua
 - **Win and lose banners:** look, and any small flourish such as a bounce-in. Animation timing stays with [Animation sequencing and input during animations](09-animation-sequencing-and-input.md).
 - **Colour roles** beyond the Pins: UI accent, ink, surfaces, success and fail. Built from the hues chosen in [Pin colours and colour-blind readability](12-pin-colours-and-colour-blind-readability.md).
 
+Also from Pin colours and colour-blind readability: the **Pin head's form**. The inspiration's heads are wide, flat, slightly domed discs, while the prototype's Pin is a tapered cylinder. The form must keep the Head mark readable on top. Also decide where the player switches on the **colour-blind setting** (one drive recess per colour), since the first playable has no settings screen yet.
+
 A rough Babylon prototype, built on `../prototypes/screen-layout.prototype.html` with variant A's layout fixed, showing two or three original styles to switch between.

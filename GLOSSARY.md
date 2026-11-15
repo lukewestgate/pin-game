@@ -10,6 +10,10 @@ A puzzle game where the player takes apart a 3D Model by removing its coloured P
 A coloured peg sitting in a Socket on the Model, which the player removes by clicking it. Each Pin holds exactly one Part.
 _Avoid_: Peg, screw, bolt
 
+**Head mark**:
+The recess drawn on a Pin's head. By default it is the same cross on every Pin, as decoration. With the colour-blind setting on, each colour has its own drive shape (cross, slot, hex, Torx, square, triangle), so Pins can be sorted without colour.
+_Avoid_: Screw head, symbol, icon
+
 **Box**:
 A holder at the top of the screen with one colour and a fixed Capacity. It closes when full, and a new Box replaces it.
 _Avoid_: Colour group, slot, bin
