@@ -3,7 +3,7 @@
 Type: prototype
 Status: open
 Parent: ../map.md
-Blocked by: 11, 12
+Blocked by: 11, 12, 18
 
 ## Question
 
@@ -31,3 +31,5 @@ _Added by [Gesture tuning](13-gesture-tuning.md): the press highlight (Pin grows
 _Added by [PWA hosting, caching and updates](15-pwa-hosting-caching-and-updates.md): the **app icon** art (one SVG that `@vite-pwa/assets-generator` turns into the 192/512 `any`, 512 `maskable` and 180 `apple-touch-icon` set, with the maskable art inside the 40%-radius safe zone) and the manifest's `theme_color` and `background_color`. The placeholder is a Candy-red Pin head with the cross recess on a neutral background. The game is named **Pin Game**. The font must be precached with the build, so no font CDN._
 
 _Added by [Sound in the first version](16-sound-in-the-first-version.md): a **mute toggle** (speaker icon, on and off states) sits in the player-facing part of the bottom bar next to Restart, outside the dev controls. Style it with the other buttons. Its state and the colour-blind setting share one `localStorage` settings store, so the colour-blind switch can sit beside it if that's where it ends up._
+
+_Added by [Screwdom 3D visual style](18-screwdom-3d-visual-style.md): start from its 15 **qualities to carry over** ([findings](../research/05-screwdom-3d-visual-style.md), section 10) rather than from scratch. One clash to settle: the inspiration has **no ink outlines** and soft Lambert-like shading, but [Achieving the clean cartoon look on mobile web](02-clean-cartoon-look-on-mobile.md) planned inverted-hull outlines. Decide outlines on or off (or on the Pins only), and toon or Lambert. Wood grain is that game's most recognisable choice, so make any material accent our own._
