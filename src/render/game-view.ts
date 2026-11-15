@@ -19,7 +19,13 @@ import { Mesh } from '@babylonjs/core/Meshes/mesh.pure';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode.pure';
 import { Scene } from '@babylonjs/core/scene.pure';
 import { buildModel, materialCache } from './model-scene';
-import { hudLayout, type HudLayout, type Rect } from './hud-layout';
+import {
+  fitDistance,
+  layout as computeLayout,
+  type HudLayout,
+  type Insets,
+  type Rect,
+} from './hud-layout';
 
 const HUD_LAYER = 0x10000000;
 const START_YAW = 0.6;
@@ -31,6 +37,8 @@ const BUFFER_SLOT = '#0f1a1f';
 
 export interface GameView {
   readonly scene: Scene;
+  /** The current layout in CSS px. */
+  readonly layout: HudLayout;
   /** Draws `state` from scratch. */
   draw(state: State): void;
   /** The Pin under a point in CSS px relative to the canvas, if any. */
@@ -44,7 +52,11 @@ function scaled(hex: string, k: number): string {
   return Color3.FromHexString(hex).scale(k).toHexString();
 }
 
-export function createGameView(engine: AbstractEngine, level: LoadedLevel): GameView {
+export function createGameView(
+  engine: AbstractEngine,
+  level: LoadedLevel,
+  getInsets: () => Insets = () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
+): GameView {
   const scene = new Scene(engine);
   scene.clearColor = new Color4(0, 0, 0, 0);
   const material = materialCache(scene);
@@ -99,22 +111,20 @@ export function createGameView(engine: AbstractEngine, level: LoadedLevel): Game
   scene.activeCameras = [camera, hud];
   const hudRoot = new TransformNode('hud', scene);
 
-  let layout: HudLayout = hudLayout(1, 1, level);
+  let layout: HudLayout = computeLayout({ width: 1, height: 1 }, getInsets(), level);
 
   function fitCameras(): void {
     const w = engine.getRenderWidth(true) * engine.getHardwareScalingLevel();
     const h = engine.getRenderHeight(true) * engine.getHardwareScalingLevel();
-    layout = hudLayout(w, h, level);
+    layout = computeLayout({ width: w, height: h }, getInsets(), level);
     hud.orthoLeft = 0;
     hud.orthoRight = w;
     hud.orthoTop = 0;
     hud.orthoBottom = -h;
     const m = layout.model;
     camera.viewport = new Viewport(m.x / w, 1 - (m.y + m.h) / h, m.w / w, m.h / h);
-    // Fit the bounding sphere into the region's narrower field of view, so no rotation clips.
-    const aspect = m.w / m.h;
-    const halfFov = Math.min(camera.fov / 2, Math.atan(Math.tan(camera.fov / 2) * aspect));
-    camera.radius = (model.bounds.radius * 1.1) / Math.sin(halfFov);
+    // The camera targets the turning centre, so it sits at the viewport's (the region's) centre.
+    camera.radius = fitDistance(model.bounds.radius, m, camera.fov);
   }
 
   function hudPlane(name: string, r: Rect, z: number, hex: string, inset = 1): Mesh {
@@ -146,14 +156,15 @@ export function createGameView(engine: AbstractEngine, level: LoadedLevel): Game
       hudPlane(`box-${b}`, rect, 0, scaled(tint, 0.92));
       layout.boxHoles[b]?.forEach((hole, i) => {
         hudPlane(`box-${b}-hole-${i}`, hole, -1, scaled(tint, 0.42), 0.9);
-        if (i < box.fill) hudPin(`box-${b}-pin-${i}`, hole, tint, 0.78);
+        if (i < box.fill) hudPin(`box-${b}-pin-${i}`, hole, tint, layout.pinHead);
       });
     });
     hudPlane('buffer', layout.buffer, 0, BUFFER_MAT);
     layout.bufferSlots.forEach((slot, i) => {
       hudPlane(`buffer-slot-${i}`, slot, -1, BUFFER_SLOT, 0.9);
       const colour = state.buffer[i];
-      if (colour !== undefined) hudPin(`buffer-pin-${i}`, slot, CANDY[colour] ?? '#ffffff', 0.72);
+      if (colour !== undefined)
+        hudPin(`buffer-pin-${i}`, slot, CANDY[colour] ?? '#ffffff', layout.pinHead);
     });
   }
 
@@ -167,6 +178,9 @@ export function createGameView(engine: AbstractEngine, level: LoadedLevel): Game
 
   return {
     scene,
+    get layout() {
+      return layout;
+    },
     draw,
     pinAt(x, y) {
       const hit = scene.pick(

@@ -24,6 +24,15 @@ body {
   touch-action: none;
 }
 
+/* Hidden probe: its padding is the safe-area insets, read as numbers by safe-insets.ts. */
+#safe-probe {
+  position: fixed;
+  visibility: hidden;
+  pointer-events: none;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+    env(safe-area-inset-left);
+}
+
 #status {
   position: fixed;
   left: 0;
@@ -36,10 +45,6 @@ body {
 
 #bar {
   position: fixed;
-  left: 10px;
-  right: 10px;
-  bottom: 10px;
-  height: 48px;
   display: flex;
   justify-content: space-between;
   gap: 6px;
