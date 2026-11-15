@@ -31,15 +31,13 @@ A buildable spec for the **first playable version**: the full Box/Buffer sorting
 - [Solver approaches for checking that levels can be won](issues/03-solver-approaches-for-winnability.md): a depth-first search over tap orders that remembers visited states is enough. The colour rule must be a pure function of the seed. With colours ≤ Boxes every level is trivially winnable, so colour count against Box count and Buffer size is the main difficulty knob.
 - [Sorting rules logic prototype](issues/04-sorting-rules-logic-prototype.md): defaults are 3 Boxes / Capacity 3 / Buffer 5, and every number stays tweakable for later hardness sliders. You lose the moment the last Buffer slot fills. The next Box prefers colours that are reachable now. The next-Box preview is a dev option only. Start the first car at about 5 colours. The prototype's rules module can be lifted into the real engine.
 - [How Models and Parts are built](issues/05-how-models-are-built.md): Models are JSON made of primitive shapes (no Blender for now). A Model (Parts, Sockets, covering) is separate from a Level (explicit Socket colours, seed, overrides). Covering is hand-written and checked by a ray-based dev warning. Authoring is hand-written JSON plus a dev viewer.
+- [Tech stack](issues/06-tech-stack.md): Babylon.js + TS on WebGL2, Vite + pnpm, Vitest, Zod, strict TS with ESLint. One package with lint-enforced pure `rules`/`solver`/`content`. `tap()` returns state plus events that rendering plays. Boxes and Buffer are drawn in the scene by an orthographic camera. The solver runs in a Web Worker in the dev viewer. See ADR 0002.
 
 ## Not yet specified
 
-- **Solver in the toolchain:** where winnability checks run beyond the dev viewer (build step, test suite, CLI), and whether the solver also scores difficulty.
-- **Screen layout and HUD look:** sizing of the Box row and Buffer on small phones, safe areas, colours readable to colour-blind players (shape or pattern on Pins?).
+- **Screen layout and HUD look:** sizing of the Box row and Buffer (drawn in the scene in world units, per Tech stack) on small phones, safe areas, colours readable to colour-blind players (shape or pattern on Pins?).
 - **Gesture tuning:** hold threshold for Peek versus tap versus drag, and the size of tap targets on small Pins. Probably needs testing on a real device once a stack exists.
-- **Animation and juice approach:** tweening library or engine built-ins, and the timing of Buffer drains relative to Box closes.
-- **PWA specifics:** offline caching, hosting, update flow, iOS home-screen quirks.
-- **Testing strategy:** how the rules engine, solver and level data get tested.
+- **PWA specifics:** offline caching (likely `vite-plugin-pwa` on the Vite build), hosting, update flow, iOS home-screen quirks.
 - **Sound:** whether any sound makes it into the first version, and its source.
 
 ## Out of scope
