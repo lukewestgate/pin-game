@@ -1,7 +1,7 @@
 # PWA facts for Vite and iOS
 
 Type: research
-Status: open
+Status: claimed
 Parent: ../map.md
 Blocked by: 06
 
