@@ -113,7 +113,7 @@
      ============================================================================================= -->
 <script id="gestures">
 const GESTURE_DEFAULTS = {
-  holdMs: 400,          // a press held this long without moving starts Peek
+  holdMs: 240,          // a press held this long without moving starts Peek
   slopTouchPx: 10,      // finger movement allowed before a press turns into a drag
   slopMousePx: 4,       // same for a mouse
   catchUp: true,        // when a drag starts, turn by the distance already moved (no lag behind the finger)
@@ -277,7 +277,7 @@ const FEEDBACK_DEFAULTS = {
   vibrate: true,            // Android only (iOS Safari has no vibrate)
   peekPinPart: true,        // holding on a Pin Peeks the Part that Pin holds
 };
-const TURN_DEFAULTS = { turnDeg: 200, turnMode: 'free' };   // degrees for a drag across the Model region's width
+const TURN_DEFAULTS = { turnDeg: 200, turnMode: 'turntable' };   // degrees for a drag across the Model region's width
 const ZOOM_DEFAULTS = { zoomMax: 2.2, pinchGain: 1.0, wheelGain: 0.0015, padGain: 0.01 };
 const DEFAULTS = Object.assign({}, GESTURE_DEFAULTS, PICK_DEFAULTS, FEEDBACK_DEFAULTS, TURN_DEFAULTS, ZOOM_DEFAULTS);
 const K = Object.assign({}, DEFAULTS);

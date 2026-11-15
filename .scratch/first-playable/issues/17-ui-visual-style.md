@@ -25,3 +25,5 @@ The human's inspiration is **Screwdom 3D**. The first playable takes on the *qua
 Also from Pin colours and colour-blind readability: the **Pin head's form**. The inspiration's heads are wide, flat, slightly domed discs, while the prototype's Pin is a tapered cylinder. The form must keep the Head mark readable on top. Also decide where the player switches on the **colour-blind setting** (one drive recess per colour), since the first playable has no settings screen yet.
 
 A rough Babylon prototype, built on `../prototypes/screen-layout.prototype.html` with variant A's layout fixed, showing two or three original styles to switch between.
+
+_Added by [Gesture tuning](13-gesture-tuning.md): the press highlight (Pin grows 1.25× with a white outline) and the red flash on the Part covering a Blocked Pin are settled as behaviour and timing. Their look can be restyled here. A Pin head form that changes the drawn head size also changes the tap target (max(head × 1.6, 36 px)), so check that close Pins can still be told apart._
