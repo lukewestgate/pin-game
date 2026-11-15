@@ -1,3 +1,13 @@
+## Commit messages
+
+Keep commit messages relatively concise, in this format:
+
+```
+<ticket ref> <short summary, under 50 chars>
+
+<implementation details and specific choices, e.g. why this approach over another>
+```
+ 
 ## Agent skills
 
 ### Issue tracker
