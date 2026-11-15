@@ -61,7 +61,7 @@ Resolved with the human on 2026-11-15. Prototype: [ui-visual-style.prototype.htm
   | Engine | `#9aa0a8` |
   | Lights | `#fff3c4` |
 
-  They replace the earlier placeholders, and they're content constants.
+  They replace the earlier placeholders, and they're content constants. _(Since replaced by the wooden toy's colours in [Car Model toy look](19-car-model-toy-look.md).)_
 
 **Pin head: pan head.**
 - **Form:** a flat rim 0.03 high, then a quarter-round dome to a total height of about 0.076. It has the same diameter as before (0.24), so the tap targets (max(head × 1.6, 36 px)) and the measured head sizes don't change.

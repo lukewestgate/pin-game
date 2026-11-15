@@ -19,7 +19,7 @@ Resolved with the human on 2026-11-15 (grilling), checked against the solver in 
 
 **Difficulty target.** The game is meant to feel mindless and relatively easy. The first level passes when the solver proves it can be won **and** its random-tap win rate (the prototype's `playouts`, measured over 1000 playouts) is **60–80%**. This band is the first difficulty to test with. The share of winning first taps can be recorded but doesn't gate.
 
-**Model: a chunky cartoon hatchback** with big wheels and a cabin seen through open windows (no glass). The body is neutral so the Pins carry all the saturated colour: cream body, dark grey tyres, light grey hubs and interior, mid-grey chassis. The 5 exact Pin hues are left to the colour-blind work in the "Screen layout and HUD look" fog.
+**Model: a chunky cartoon hatchback** with big wheels and a cabin seen through open windows (no glass). The body is neutral so the Pins carry all the saturated colour: cream body, dark grey tyres, light grey hubs and interior, mid-grey chassis. The 5 exact Pin hues are left to the colour-blind work in the "Screen layout and HUD look" fog. _(Look superseded by [Car Model toy look](19-car-model-toy-look.md): a wooden toy with painted plates. Parts, Sockets and covering unchanged.)_
 
 **Parts and Sockets (30 Pins).** There are two depths, outer and inner, plus Cores. There are no cross-links, and each inner Pin is covered by exactly one Part, along its pull-out ray.
 

@@ -1,7 +1,7 @@
 # Car Model toy look
 
 Type: prototype
-Status: claimed
+Status: resolved
 Parent: ../map.md
 Blocked by: 07, 17, 18
 
@@ -30,5 +30,41 @@ What all three toy takes share, and what changed against the current car:
 - An optional per-shape **`round`** (edge radius in Model units). It overrides UI visual style's renderer default of min(0.07, 0.45 × smallest side), which is too small for a toy look. A uses up to 0.2, B uses 0.045.
 - C only: an optional per-shape **`finish: "wood"`**, a procedural grain texture drawn in code, with box-projected UVs on rounded boxes.
 - The **car colour table** in UI visual style is replaced by the winning take's colours (listed in the prototype's panel).
+
+## Answer
+
+Resolved with the human on 2026-11-15. The human said "i do like the wooden toy", so **C · Wooden toy** is taken whole, with its Socket positions as built in the prototype (`?car=C`). Its self-check passes: same Part ids, Socket counts and covering as [Car level design](07-car-level-design.md), and every inner Pin's pull-out ray hits its covering Part. So the Level, its seeded deal and the 60–80% random-tap target are unchanged. No glossary changes.
+
+**The look:**
+- A grained wood body: a deep tub, a nose, engine-bay sides, a dash, mudguards over all four wheels, and rear quarter panels. These are all Core shapes of `chassis`.
+- Darker wood dowels for the four pillars, the two axles, the steering wheel and the two bumpers.
+- Wooden hubs inside dark rubber tyres, on the four wheels and the spare.
+- Each outer plate is painted its own muted tint, held on by its Pins. Seats and rear seat are pale wood. The engine is painted grey. The headlights are painted cream discs.
+- Doors are shorter than before (front edge at x 0.45), and the tailgate's lower Socket moved to (−1.76, 1.45, −0.58) to clear the mudguards. All Socket positions are in the prototype's `SK.sockets`.
+- Start view: front three-quarter from slightly above (yaw 0.6, pitch −0.35).
+
+**Car colours** (content constants; they replace the table in [UI visual style](17-ui-visual-style.md)):
+
+| Part of the car | Hex |
+|---|---|
+| Wood (body, hubs, quarters, mudguards) | `#d9aa78` |
+| Dark wood (pillars, axles, bumpers, steering wheel) | `#b8865a` |
+| Bonnet (slate) | `#8fa7c4` |
+| Roof (rose) | `#d8a3a0` |
+| Doors (sage) | `#a7c09a` |
+| Tailgate (lilac) | `#b4a5cf` |
+| Tyre | `#3a3d45` |
+| Interior (pale wood) | `#e8cfa6` |
+| Engine | `#9aa0a8` |
+| Lights | `#fff3c4` |
+
+The spare wheel uses the tyre and wood colours. The plate tints stay far less saturated than the Candy Pins, so the Pins still carry the colour.
+
+**Model format** (recorded in [ADR 0001](../../../docs/adr/0001-models-built-from-primitives-in-data.md)):
+- An optional per-shape **`round`**: the edge radius in Model units, clamped to fit the shape. Without it, the renderer default from UI visual style applies (min(0.07, 0.45 × smallest side) for boxes). The wooden car uses 0.05–0.12.
+- An optional per-shape **`finish`**, with one value for now: `"wood"`. It multiplies the body colour by a procedural grain texture drawn in code at load time (no image asset). Rounded boxes get box-projected UVs (by the dominant normal axis, one repeat per 1.2 units). Lathed shapes use their own UVs.
+- Both stay plain data, so a generator can still write them.
+
+**Handed on:** whether the grain stays readable at small sizes on a real phone, and its cost, goes on the device checklist. The fallback is the same colours without the texture.
 
 ## Comments
