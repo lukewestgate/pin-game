@@ -7,6 +7,7 @@ import { canUndo, commit, startHistory, undo, type History } from './rules/histo
 import { initialState, tap } from './rules/rules';
 import type { State } from './rules/state';
 import { createGameView } from './render/game-view';
+import { readSafeInsets } from './render/safe-insets';
 
 const TAP_SLOP_PX = 6;
 
@@ -32,7 +33,20 @@ const engine = new Engine(
   { alpha: true, premultipliedAlpha: false, stencil: true },
   true,
 );
-const view = createGameView(engine, level);
+const view = createGameView(engine, level, readSafeInsets);
+const bar = element('bar');
+
+/** Puts the DOM bottom bar where the layout says. */
+function placeBar(): void {
+  const r = view.layout.bottomBar;
+  Object.assign(bar.style, {
+    left: `${r.x}px`,
+    top: `${r.y}px`,
+    width: `${r.w}px`,
+    height: `${r.h}px`,
+  });
+}
+placeBar();
 
 const start = initialState(level).state;
 let history: History<State> = startHistory(start);
@@ -84,6 +98,7 @@ restartButton.addEventListener('click', () => {
 window.addEventListener('resize', () => {
   engine.resize();
   view.resize();
+  placeBar();
 });
 
 show();
