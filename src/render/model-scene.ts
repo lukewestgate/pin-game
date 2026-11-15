@@ -1,7 +1,7 @@
 // Builds a Model's meshes from its JSON shapes. Kept apart from the HUD and input, so a future
 // editor can reuse it. Boxes are rounded (`round`) with box-projected UVs, cylinders are lathed
 // with soft rims, `finish: "wood"` multiplies the colour by a grain drawn in code, and all
-// normals are smooth. Toon shading arrives with ticket 28.
+// normals are smooth. Every material gets 3-band toon shading.
 import type { ModelData, Shape } from '../content/schema';
 import { Constants } from '@babylonjs/core/Engines/constants';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial.pure';
@@ -16,7 +16,8 @@ import { Mesh } from '@babylonjs/core/Meshes/mesh.pure';
 import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode.pure';
 import type { Scene } from '@babylonjs/core/scene.pure';
-import { roundedBoxData, type MeshData } from './rounded-box';
+import { cylinderBevel, roundedBoxData, type MeshData } from './rounded-box';
+import { ToonPlugin } from './toon';
 import { grainPixels } from './wood-grain';
 
 export interface ModelScene {
@@ -63,6 +64,7 @@ export function materialCache(scene: Scene): MaterialFor {
       mat = new StandardMaterial(`mat-${key}`, scene);
       mat.diffuseColor = Color3.FromHexString(hex);
       mat.specularColor = new Color3(0.1, 0.1, 0.1);
+      new ToonPlugin(mat);
       if (finish === 'wood') mat.diffuseTexture = woodTexture();
       cache.set(key, mat);
     }
@@ -70,7 +72,7 @@ export function materialCache(scene: Scene): MaterialFor {
   };
 }
 
-function applyData(mesh: Mesh, data: MeshData): Mesh {
+export function applyData(mesh: Mesh, data: MeshData): Mesh {
   const vd = new VertexData();
   vd.positions = data.positions;
   vd.indices = data.indices;
@@ -95,7 +97,7 @@ function roundedCylinder(
 ): Mesh {
   const R = shape.diameter / 2;
   const h = shape.height;
-  const b = Math.min(shape.round ?? 0.06, shape.diameter * 0.45, h * 0.45);
+  const b = cylinderBevel(shape.diameter, h, shape.round);
   const profile = [
     new Vector3(0, -h / 2, 0),
     ...arc(R - b, -h / 2 + b, b, -Math.PI / 2, 0, 5),

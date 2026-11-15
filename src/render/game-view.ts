@@ -13,12 +13,13 @@ import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial.pur
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color.pure';
 import { Quaternion, Vector3 } from '@babylonjs/core/Maths/math.vector.pure';
 import { Viewport } from '@babylonjs/core/Maths/math.viewport';
-import { CreateCylinder } from '@babylonjs/core/Meshes/Builders/cylinderBuilder.pure';
 import { CreatePlane } from '@babylonjs/core/Meshes/Builders/planeBuilder.pure';
 import { Mesh } from '@babylonjs/core/Meshes/mesh.pure';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode.pure';
 import { Scene } from '@babylonjs/core/scene.pure';
-import { PIN, buildModel, materialCache } from './model-scene';
+import { buildModel, materialCache } from './model-scene';
+import { PIN_HEAD } from './pin-geometry';
+import { createPinFactory } from './pins';
 import {
   fitDistance,
   layout as computeLayout,
@@ -40,6 +41,9 @@ export interface GameView {
   readonly layout: HudLayout;
   /** Draws `state` from scratch. */
   draw(state: State): void;
+  /** Shows the threaded shank, `length` Model units long, under a car Pin that is popping out;
+   * null hides it. The Timeline calls this while a Pin lifts. */
+  popOut(pin: number, length: number | null): void;
   /** The Pin under a point in CSS px relative to the canvas, if any. */
   pinAt(x: number, y: number): number | null;
   /** Call after the canvas changes size. */
@@ -73,25 +77,26 @@ export function createGameView(
     };
   })();
 
-  new HemisphericLight('light', new Vector3(0.3, 1, -0.4), scene);
+  const light = new HemisphericLight('light', new Vector3(0.3, 1, -0.4), scene);
+  light.groundColor = new Color3(0.45, 0.45, 0.45);
 
   // ---- Model and Pins ----
   const model = buildModel(scene, level.model, material);
+  const pins = createPinFactory(scene, model.root);
   const pinMeshes = level.pinSockets.map((socket, i) => {
     const pin = level.pins[i];
     if (!pin) throw new Error(`Pin ${i} has no rules entry`);
-    const mesh = CreateCylinder(
+    const made = pins.create(
       `pin-${socket.id}`,
-      { diameter: PIN.diameter, height: PIN.height, tessellation: PIN.segments },
-      scene,
+      CANDY[pin.colour] ?? '#ffffff',
+      model.parts[pin.part] ?? null,
     );
+    const mesh = made.head;
     const dir = Vector3.FromArray(socket.direction).normalize();
-    mesh.parent = model.parts[pin.part] ?? null;
-    mesh.position = Vector3.FromArray(socket.position).add(dir.scale(PIN.height / 2));
+    mesh.position = Vector3.FromArray(socket.position);
     mesh.rotationQuaternion = Quaternion.FromUnitVectorsToRef(Vector3.Up(), dir, new Quaternion());
-    mesh.material = material(CANDY[pin.colour] ?? '#ffffff');
     mesh.metadata = { pin: i };
-    return mesh;
+    return made;
   });
 
   const camera = new ArcRotateCamera(
@@ -141,17 +146,17 @@ export function createGameView(
   }
 
   function hudPin(name: string, r: Rect, hex: string, size: number): void {
-    const mesh = CreateCylinder(name, { diameter: r.w * size, height: 1, tessellation: 24 }, scene);
-    mesh.parent = hudRoot;
-    mesh.layerMask = HUD_LAYER;
-    mesh.isPickable = false;
-    mesh.rotation.x = -Math.PI / 2;
-    mesh.position = new Vector3(r.x + r.w / 2, -(r.y + r.h / 2), -3);
-    mesh.material = flat(hex);
+    const { head } = pins.create(name, hex, hudRoot);
+    head.layerMask = HUD_LAYER;
+    for (const child of head.getChildMeshes()) child.layerMask = HUD_LAYER;
+    head.isPickable = false;
+    head.scaling.setAll((r.w * size) / PIN_HEAD.diameter);
+    head.rotation.x = -Math.PI / 2;
+    head.position = new Vector3(r.x + r.w / 2, -(r.y + r.h / 2), -3);
   }
 
   function drawHud(state: State): void {
-    for (const child of hudRoot.getChildMeshes()) child.dispose();
+    for (const child of hudRoot.getChildMeshes(true)) child.dispose();
     state.boxes.forEach((box, b) => {
       const rect = layout.boxes[b];
       if (!rect) return;
@@ -172,7 +177,7 @@ export function createGameView(
   }
 
   function draw(state: State): void {
-    pinMeshes.forEach((mesh, i) => mesh.setEnabled(!state.removed[i]));
+    pinMeshes.forEach(({ head }, i) => head.setEnabled(!state.removed[i]));
     model.parts.forEach((node, p) => node.setEnabled(!hasFallen(level, state, p)));
     drawHud(state);
   }
@@ -189,12 +194,16 @@ export function createGameView(
       const hit = scene.pick(
         x,
         y,
-        (mesh) => mesh.isEnabled() && mesh.layerMask !== HUD_LAYER,
+        (mesh) =>
+          mesh.isEnabled() && mesh.isVisible && mesh.isPickable && mesh.layerMask !== HUD_LAYER,
         false,
         camera,
       );
       const pin: unknown = (hit.pickedMesh?.metadata as { pin?: unknown } | null)?.pin;
       return typeof pin === 'number' ? pin : null;
+    },
+    popOut(pin, length) {
+      pinMeshes[pin]?.setShank(length);
     },
     resize: fitCameras,
     dispose: () => scene.dispose(),

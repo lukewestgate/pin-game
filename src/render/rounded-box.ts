@@ -140,3 +140,8 @@ export function roundedBoxData(size: readonly [number, number, number], round?: 
   }
   return { positions, indices, normals, uvs };
 }
+
+/** A cylinder's rim bevel: min(0.06, 0.2 x diameter, 0.45 x height), or the shape's own `round`. */
+export function cylinderBevel(diameter: number, height: number, round?: number): number {
+  return Math.min(round ?? 0.06, 0.2 * diameter, 0.45 * height);
+}
