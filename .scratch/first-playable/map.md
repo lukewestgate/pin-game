@@ -51,7 +51,7 @@ A buildable spec for the **first playable version**: the full Box/Buffer sorting
 
 <!-- 2026-11-15: all fog graduated into tickets. Screen layout and HUD look became Screen layout and HUD plus Pin colours and colour-blind readability. Gesture tuning became Gesture tuning. PWA specifics became PWA facts for Vite and iOS plus PWA hosting, caching and updates. Sound became Sound in the first version. -->
 
-Nothing left in the fog, and no open tickets. The way is clear: hand off to `/to-spec`.
+Nothing left in the fog, and no open tickets. Handed off to `/to-spec` on 2026-11-15: see [spec.md](spec.md) (`ready-for-agent`).
 
 ## Out of scope
 
