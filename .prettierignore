@@ -1,0 +1,6 @@
+.scratch/
+.claude/
+dist/
+coverage/
+pnpm-lock.yaml
+*.md

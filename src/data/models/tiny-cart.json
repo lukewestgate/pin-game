@@ -1,0 +1,207 @@
+{
+  "id": "tiny-cart",
+  "formatVersion": 1,
+  "parts": [
+    {
+      "id": "wheel-fl",
+      "shapes": [
+        {
+          "kind": "cylinder",
+          "diameter": 0.6,
+          "height": 0.2,
+          "position": [0.8, 0.3, -0.7],
+          "rotation": [1.570796, 0, 0],
+          "colour": "#3a3d45"
+        }
+      ],
+      "sockets": [
+        {
+          "id": "wheel-fl",
+          "position": [0.8, 0.3, -0.82],
+          "direction": [0, 0, -1],
+          "coveredBy": []
+        }
+      ]
+    },
+    {
+      "id": "wheel-fr",
+      "shapes": [
+        {
+          "kind": "cylinder",
+          "diameter": 0.6,
+          "height": 0.2,
+          "position": [0.8, 0.3, 0.7],
+          "rotation": [1.570796, 0, 0],
+          "colour": "#3a3d45"
+        }
+      ],
+      "sockets": [
+        {
+          "id": "wheel-fr",
+          "position": [0.8, 0.3, 0.82],
+          "direction": [0, 0, 1],
+          "coveredBy": []
+        }
+      ]
+    },
+    {
+      "id": "wheel-rl",
+      "shapes": [
+        {
+          "kind": "cylinder",
+          "diameter": 0.6,
+          "height": 0.2,
+          "position": [-0.8, 0.3, -0.7],
+          "rotation": [1.570796, 0, 0],
+          "colour": "#3a3d45"
+        }
+      ],
+      "sockets": [
+        {
+          "id": "wheel-rl",
+          "position": [-0.8, 0.3, -0.82],
+          "direction": [0, 0, -1],
+          "coveredBy": []
+        }
+      ]
+    },
+    {
+      "id": "wheel-rr",
+      "shapes": [
+        {
+          "kind": "cylinder",
+          "diameter": 0.6,
+          "height": 0.2,
+          "position": [-0.8, 0.3, 0.7],
+          "rotation": [1.570796, 0, 0],
+          "colour": "#3a3d45"
+        }
+      ],
+      "sockets": [
+        {
+          "id": "wheel-rr",
+          "position": [-0.8, 0.3, 0.82],
+          "direction": [0, 0, 1],
+          "coveredBy": []
+        }
+      ]
+    },
+    {
+      "id": "axle-front",
+      "shapes": [
+        {
+          "kind": "cylinder",
+          "diameter": 0.12,
+          "height": 1.4,
+          "position": [0.8, 0.3, 0],
+          "rotation": [1.570796, 0, 0],
+          "colour": "#9aa0a8"
+        }
+      ],
+      "sockets": [
+        {
+          "id": "axle-front-l",
+          "position": [0.8, 0.3, -0.62],
+          "direction": [0, 0, -1],
+          "coveredBy": ["wheel-fl"]
+        },
+        {
+          "id": "axle-front-r",
+          "position": [0.8, 0.3, 0.62],
+          "direction": [0, 0, 1],
+          "coveredBy": ["wheel-fr"]
+        }
+      ]
+    },
+    {
+      "id": "axle-rear",
+      "shapes": [
+        {
+          "kind": "cylinder",
+          "diameter": 0.12,
+          "height": 1.4,
+          "position": [-0.8, 0.3, 0],
+          "rotation": [1.570796, 0, 0],
+          "colour": "#9aa0a8"
+        }
+      ],
+      "sockets": [
+        {
+          "id": "axle-rear-l",
+          "position": [-0.8, 0.3, -0.62],
+          "direction": [0, 0, -1],
+          "coveredBy": ["wheel-rl"]
+        },
+        {
+          "id": "axle-rear-r",
+          "position": [-0.8, 0.3, 0.62],
+          "direction": [0, 0, 1],
+          "coveredBy": ["wheel-rr"]
+        }
+      ]
+    },
+    {
+      "id": "crate",
+      "shapes": [
+        {
+          "kind": "box",
+          "size": [1, 0.6, 0.9],
+          "position": [0, 0.9, 0],
+          "colour": "#e8cfa6"
+        }
+      ],
+      "sockets": [
+        {
+          "id": "crate-a",
+          "position": [-0.25, 1.2, 0],
+          "direction": [0, 1, 0],
+          "coveredBy": ["lid"]
+        },
+        {
+          "id": "crate-b",
+          "position": [0.25, 1.2, 0],
+          "direction": [0, 1, 0],
+          "coveredBy": ["lid"]
+        }
+      ]
+    },
+    {
+      "id": "lid",
+      "shapes": [
+        {
+          "kind": "box",
+          "size": [1.2, 0.12, 1.0],
+          "position": [0, 1.26, 0],
+          "colour": "#8fa7c4"
+        }
+      ],
+      "sockets": [
+        {
+          "id": "lid-a",
+          "position": [-0.3, 1.32, 0.25],
+          "direction": [0, 1, 0],
+          "coveredBy": []
+        },
+        {
+          "id": "lid-b",
+          "position": [0.3, 1.32, -0.25],
+          "direction": [0, 1, 0],
+          "coveredBy": []
+        }
+      ]
+    },
+    {
+      "id": "base",
+      "shapes": [
+        {
+          "kind": "box",
+          "size": [2.4, 0.3, 1.2],
+          "position": [0, 0.45, 0],
+          "colour": "#d9aa78",
+          "finish": "wood"
+        }
+      ],
+      "sockets": []
+    }
+  ]
+}

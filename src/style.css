@@ -1,0 +1,65 @@
+/* Plain walking-skeleton styles. The Workbench HUD look arrives with ticket 29. */
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background: radial-gradient(120% 75% at 50% 48%, #5a7783, #34505b 55%, #1f2f36);
+  color: #fff;
+  font-family: system-ui, sans-serif;
+}
+
+* {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+#scene {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+#status {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 68px;
+  margin: 0;
+  text-align: center;
+  pointer-events: none;
+}
+
+#bar {
+  position: fixed;
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  height: 48px;
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+#bar button {
+  font: inherit;
+  font-weight: 700;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 24px;
+  background: #13a3c4;
+  color: #fff;
+}
+
+#bar button.dev {
+  background: #ffd60a;
+  color: #13202a;
+}
+
+#bar button:disabled {
+  opacity: 0.5;
+}

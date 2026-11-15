@@ -1,0 +1,20 @@
+{
+  "id": "tiny-cart-1",
+  "formatVersion": 1,
+  "model": "tiny-cart",
+  "seed": 1,
+  "colours": {
+    "wheel-fl": 0,
+    "wheel-fr": 1,
+    "wheel-rl": 2,
+    "wheel-rr": 3,
+    "axle-front-l": 1,
+    "axle-front-r": 2,
+    "axle-rear-l": 3,
+    "axle-rear-r": 0,
+    "crate-a": 2,
+    "crate-b": 3,
+    "lid-a": 0,
+    "lid-b": 1
+  }
+}
