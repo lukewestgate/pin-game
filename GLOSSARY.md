@@ -50,3 +50,21 @@ _Avoid_: Locked, hidden, covered (as a state name)
 **Peek**:
 Pressing and holding on a Part to see it transparently, showing the Pins beneath so the player can plan ahead.
 _Avoid_: X-ray, preview
+
+### Game (future: not in the first version)
+
+**Campaign**:
+The main ordered sequence of hand-made Levels, which gently gets harder.
+_Avoid_: Story, world, saga
+
+**Pack**:
+An optional themed sequence of Levels, played apart from the Campaign.
+_Avoid_: Chapter, world, collection
+
+**Booster**:
+A one-off player action that bends the rules for a single Level, such as adding a Buffer slot.
+_Avoid_: Power-up, item, cheat
+
+**Endless mode**:
+Play on Levels generated on the device from rule numbers the player chooses.
+_Avoid_: Procedural mode, infinite mode
