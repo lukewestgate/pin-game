@@ -1,0 +1,591 @@
+<!doctype html>
+<!--
+  PROTOTYPE · throwaway. Ticket: Pin colours and colour-blind readability
+  (issues/12-pin-colours-and-colour-blind-readability.md).
+  Plan: four cue strategies on one page, switched by ?variant=A|B|C|D (bottom bar or ← →), each
+  shown with a choice of palettes (?palette=), colour count 5–10 (?n=), a colour-blind simulation
+  (?cvd=protan|deutan|tritan|achroma) and Lambert or cel shading (?shade=cel).
+  Layout is variant A from Screen layout and HUD, fixed. The car is the car from that prototype.
+  Colour-blind simulation: Machado, Oliveira & Fernandes 2009, severity 1.0, as an SVG
+  feColorMatrix applied in linear RGB to the whole stage (canvas included).
+  Scores: smallest OKLab distance (×100) between any two Pin colours, per vision, and from any
+  Pin colour to the car's neutral body colours. The same maths is in pin-palette-check.cjs.
+  Run: double-click, or for a phone:  python3 -m http.server 8000 --bind 0.0.0.0  in this folder,
+  then open http://<this-machine>:8000/pin-colours.prototype.html?device=window on the phone.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>PROTOTYPE: Pin colours and colour-blind readability</title>
+<script>
+  window.onerror = (msg, src, line) => { const t = document.getElementById('err'); if (t) { t.style.display = 'block'; t.textContent = 'ERROR: ' + msg + ' (line ' + line + ')'; } };
+</script>
+<script src="https://cdn.babylonjs.com/babylon.js"></script>
+<script src="https://cdn.babylonjs.com/materialsLibrary/babylonjs.materials.min.js"></script>
+<style>
+  :root { --accent: #3e63dd; --ink: #1c2024; --muted: #60646c; --line: #e0e1e6; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; font: 14px/1.45 system-ui, sans-serif; color: var(--ink); background: #2b2f36; overscroll-behavior: none; }
+  body { display: flex; overflow: hidden; }
+  #desk { flex: 1; display: flex; align-items: center; justify-content: center; min-width: 0; }
+  #frameWrap { flex: none; transform-origin: center center; }
+  #stage { position: relative; overflow: hidden; background: #cfe8f3; border-radius: 28px; box-shadow: 0 0 0 10px #111, 0 10px 40px #0008; }
+  body.real #desk { display: block; }
+  body.real #stage { position: fixed; inset: 0; width: 100vw !important; height: 100dvh !important; border-radius: 0; box-shadow: none; }
+  #c { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; outline: none; -webkit-user-select: none; user-select: none; }
+  #overlay { position: absolute; inset: 0; pointer-events: none; }
+  #overlay > * { position: absolute; }
+  #tag { font-size: 10px; color: #0007; }
+  #err { display: none; position: fixed; top: 0; left: 0; right: 0; z-index: 99; background: #c00; color: #fff; padding: 6px; font: 12px ui-monospace, monospace; }
+  .gbtn { pointer-events: auto; font: 600 15px/1 system-ui, sans-serif; color: #1c2024; background: #fff; border: 0; border-radius: 12px; box-shadow: 0 2px 0 #0002, 0 1px 6px #0001; display: flex; align-items: center; justify-content: center; }
+  .gbtn.dev { background: #fff4c2; color: #6b4e00; font-weight: 500; font-size: 13px; }
+  /* dev panel + switcher (not part of the design under review) */
+  #panel { width: 420px; flex: none; height: 100dvh; overflow: auto; padding: 14px 16px 80px; background: #fff; }
+  body.real #panel, body.narrow #panel { position: fixed; inset: 0; width: auto; z-index: 20; display: none; }
+  body.panelOpen #panel { display: block; }
+  #panel h1 { font-size: 16px; margin: 0 0 4px; }
+  #panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 16px 0 6px; }
+  #panel p, #panel li { margin: 3px 0 6px; font-size: 13px; }
+  #panel ul { padding-left: 18px; margin: 4px 0; }
+  .muted { color: var(--muted); font-size: 12px; }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 5px 0; }
+  .seg button { font: inherit; font-size: 13px; padding: 5px 9px; border: 1px solid var(--line); background: #fff; border-radius: 6px; cursor: pointer; }
+  .seg button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+  select { font: inherit; font-size: 13px; padding: 3px 5px; }
+  #swatches { display: flex; gap: 4px; flex-wrap: wrap; padding: 6px; background: #f3e6c8; border-radius: 8px; }
+  #swatches div { width: 34px; height: 34px; border-radius: 50%; border: 2px solid #1e1e24; display: flex; align-items: center; justify-content: center; font: 600 10px/1 system-ui; }
+  table.read { border-collapse: collapse; font-size: 12px; width: 100%; }
+  table.read td, table.read th { padding: 3px 4px; border-bottom: 1px solid #f0f0f3; text-align: left; }
+  table.read th { font-weight: 600; color: var(--muted); }
+  td.num { font-family: ui-monospace, monospace; text-align: right; }
+  .good { background: #dff3e4; } .meh { background: #fff4c2; } .bad { background: #fde2e2; }
+  #switcher { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 30; display: flex; align-items: center; gap: 2px; background: #111d; color: #fff; padding: 4px; border-radius: 999px; box-shadow: 0 4px 16px #0006; font: 13px/1 system-ui, sans-serif; -webkit-user-select: none; user-select: none; }
+  #switcher button, #switcher select { font: inherit; color: #fff; background: transparent; border: 0; padding: 7px 9px; border-radius: 999px; cursor: pointer; }
+  #switcher select option { color: #000; }
+  #switcher button:hover { background: #fff2; }
+  #vlabel { padding: 0 6px; min-width: 200px; text-align: center; white-space: nowrap; }
+  body.real #switcher { bottom: calc(env(safe-area-inset-bottom) + 70px); opacity: .9; }
+  #probe { position: fixed; visibility: hidden; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  .cvd-protan { filter: url(#f-protan); } .cvd-deutan { filter: url(#f-deutan); } .cvd-tritan { filter: url(#f-tritan); } .cvd-achroma { filter: url(#f-achroma); }
+</style>
+</head>
+<body>
+<div id="err"></div>
+<svg width="0" height="0" style="position:absolute">
+  <!-- Machado 2009, severity 1.0, linear RGB (feColorMatrix's default colour space). -->
+  <filter id="f-protan" color-interpolation-filters="linearRGB"><feColorMatrix type="matrix" values="0.152286 1.052583 -0.204868 0 0  0.114503 0.786281 0.099216 0 0  -0.003882 -0.048116 1.051998 0 0  0 0 0 1 0"/></filter>
+  <filter id="f-deutan" color-interpolation-filters="linearRGB"><feColorMatrix type="matrix" values="0.367322 0.860646 -0.227968 0 0  0.280085 0.672501 0.047413 0 0  -0.011820 0.042940 0.968881 0 0  0 0 0 1 0"/></filter>
+  <filter id="f-tritan" color-interpolation-filters="linearRGB"><feColorMatrix type="matrix" values="1.255528 -0.076749 -0.178779 0 0  -0.078411 0.930809 0.147602 0 0  0.004733 0.691367 0.303900 0 0  0 0 0 1 0"/></filter>
+  <filter id="f-achroma" color-interpolation-filters="linearRGB"><feColorMatrix type="matrix" values="0.2126 0.7152 0.0722 0 0  0.2126 0.7152 0.0722 0 0  0.2126 0.7152 0.0722 0 0  0 0 0 1 0"/></filter>
+</svg>
+<div id="desk">
+  <div id="frameWrap">
+    <div id="stage">
+      <canvas id="c"></canvas>
+      <div id="overlay"></div>
+    </div>
+  </div>
+</div>
+
+<div id="panel">
+  <h1>Pin colours and colour-blind readability · prototype</h1>
+  <p class="muted">Throwaway. Drag to turn the car, pinch or scroll to zoom. Nothing can be tapped. The layout is fixed (variant A from Screen layout and HUD); only Pin colours and cues change.</p>
+
+  <h2>Cue variant (also ← → or the bottom bar)</h2>
+  <div class="row seg" id="segVariant"></div>
+  <p class="muted" id="variantNote"></p>
+
+  <h2>Palette</h2>
+  <div class="row seg" id="segPalette"></div>
+  <p class="muted" id="paletteNote"></p>
+  <div class="row">Colours in play <input type="range" id="nColours" min="5" max="10" value="5"> <b id="nColoursLbl">5</b></div>
+  <div id="swatches"></div>
+  <p class="muted">Swatches sit on the car's cream body colour. The simulation below also applies to them.</p>
+
+  <h2>Vision (simulated)</h2>
+  <div class="row seg" id="segCvd"></div>
+  <p class="muted">Protanopia and deuteranopia (red-green) affect about 1 in 12 men together; tritanopia (blue-yellow) is rare. "Lightness only" shows what survives with no hue at all, a good worst case.</p>
+
+  <h2>Shading</h2>
+  <div class="row seg" id="segShade"></div>
+
+  <h2>Scene</h2>
+  <div class="row"><select id="selDevice"></select></div>
+  <div class="row seg" id="segFill"></div>
+
+  <h2>How far apart the colours are</h2>
+  <p class="muted">Smallest OKLab distance ×100 between any two Pin colours in play, and from any Pin colour to the car's body colours (cream, greys, tyre). Rough guide: <span class="good">&nbsp;≥ 12 clear&nbsp;</span> <span class="meh">&nbsp;7–12 look twice&nbsp;</span> <span class="bad">&nbsp;&lt; 7 confusable&nbsp;</span> at Pin size.</p>
+  <table class="read" id="scores"></table>
+
+  <h2>What to judge</h2>
+  <ul>
+    <li>With 5 colours and normal vision: do the Pins pop off the cream and grey car, and do they look like a set you'd want in the game?</li>
+    <li>Switch the vision to protan and deutan: can you still sort every Pin in the Buffer to its Box at a glance?</li>
+    <li>Cue A vs B vs C vs D: which second cue (if any) helps without cluttering? Does it still read at 1× zoom on the smallest phone?</li>
+    <li>Push the colour count to 8 and 10 (Endless hardness): where does colour alone stop working, and does the cue carry it?</li>
+    <li>Lambert vs cel shading: does the shadowed side of a Pin change its colour enough to confuse it with a neighbour?</li>
+  </ul>
+</div>
+
+<div id="switcher">
+  <button id="prev" title="Previous variant (←)">‹</button>
+  <span id="vlabel"></span>
+  <button id="next" title="Next variant (→)">›</button>
+  <select id="cvdQuick" title="Simulated vision"></select>
+  <button id="panelToggle" title="Settings">⚙</button>
+</div>
+<div id="probe"></div>
+
+<script>
+// ===================================================================
+// Config and URL state
+const $ = id => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+const VARIANTS = {
+  A: { name: 'Colour only', note: 'Pins differ by colour alone. Cheapest: one instanced Pin mesh, colour as an instance attribute.' },
+  B: { name: 'Symbol on every Pin', note: 'Each colour also has a symbol on the Pin head, on the car, in the Boxes and in the Buffer. Empty Box slots show their symbol faintly. In the real build: one instanced mesh, symbol picked from a texture atlas by a per-instance index.' },
+  C: { name: 'Head shape per colour', note: 'Each colour has its own Pin head silhouette (round, triangle, square, star, plus, hexagon). One instanced mesh per shape: 6 draw calls instead of 1. Only 6 shapes, so past 6 colours shapes repeat (marked in the scores).' },
+  D: { name: 'Symbols in Boxes and Buffer only', note: 'Pins on the car are colour only. Once a Pin is in a Box or the Buffer it shows its symbol, and each Box shows its symbol in its empty slots. Helps matching Buffer to Box, not choosing what to tap.' },
+};
+const PALETTES = {
+  ladder: { name: 'Ladder (scored)', note: 'Picked by the scoring script: hues spread in lightness as well as hue, with black as the fifth. Stays ≥ 15 in every vision up to 7 colours.',
+    c: [['red', '#e63b3b'], ['yellow', '#ffd426'], ['sky', '#4fa3ff'], ['blue', '#2a55e0'], ['black', '#1b1b22'], ['navy', '#1f2f8f'], ['white', '#ffffff'], ['orange', '#ff9a1a'], ['cyan', '#36c8ec'], ['magenta', '#d63bb8']] },
+  warm: { name: 'Ladder, no black', note: 'Same idea but the fifth colour is orange, not black: all five are saturated hues. Yellow and orange are the weak pair under deuteranopia.',
+    c: [['red', '#e63b3b'], ['yellow', '#ffd426'], ['sky', '#4fa3ff'], ['blue', '#2a55e0'], ['orange', '#ff9a1a'], ['white', '#ffffff'], ['navy', '#1f2f8f'], ['black', '#1b1b22'], ['cyan', '#36c8ec'], ['magenta', '#d63bb8']] },
+  okabe: { name: 'Okabe–Ito', note: 'The standard colour-blind-safe set from data visualisation. Muted next to toy colours; yellow is close to the cream body under tritanopia.',
+    c: [['orange', '#e69f00'], ['sky', '#56b4e9'], ['green', '#009e73'], ['yellow', '#f0e442'], ['blue', '#0072b2'], ['vermilion', '#d55e00'], ['pink', '#cc79a7'], ['black', '#1b1b22'], ['white', '#ffffff'], ['purple', '#8a46d6']] },
+  toy: { name: 'Toy classic', note: 'Red, yellow, green, blue, purple: what most sorting games use. Looks great, but blue and purple merge under protanopia and red and green under deuteranopia. Needs a cue.',
+    c: [['red', '#e63b3b'], ['yellow', '#ffd426'], ['green', '#2fb350'], ['blue', '#2a55e0'], ['purple', '#8a46d6'], ['orange', '#ff9a1a'], ['pink', '#ff7fbf'], ['cyan', '#36c8ec'], ['white', '#ffffff'], ['black', '#1b1b22']] },
+  placeholder: { name: 'Placeholder', note: 'The colours used by earlier prototypes, for comparison.',
+    c: [['red', '#e5484d'], ['blue', '#3e63dd'], ['yellow', '#ffc53d'], ['green', '#30a46c'], ['purple', '#8e4ec6'], ['orange', '#f76b15'], ['pink', '#d6409f'], ['cyan', '#00a2c7'], ['white', '#ffffff'], ['black', '#1b1b22']] },
+};
+const CVDS = { none: 'Normal vision', protan: 'Protanopia', deutan: 'Deuteranopia', tritan: 'Tritanopia', achroma: 'Lightness only' };
+const PRESETS = {
+  window: { name: 'This window (use on a real phone)', real: true },
+  s360: { name: 'Small Android · 360 × 640', w: 360, h: 640, t: 0, b: 0 },
+  i14: { name: 'iPhone 14/15 · 390 × 844', w: 390, h: 844, t: 47, b: 34 },
+};
+const pick = (k, obj, d) => (obj[params.get(k)] ? params.get(k) : d);
+const S = {
+  variant: pick('variant', VARIANTS, 'A'),
+  palette: pick('palette', PALETTES, 'ladder'),
+  n: Math.max(5, Math.min(10, parseInt(params.get('n')) || 5)),
+  cvd: pick('cvd', CVDS, 'none'),
+  shade: params.get('shade') === 'cel' ? 'cel' : 'lambert',
+  device: PRESETS[params.get('device')] ? params.get('device') : (innerWidth < 700 ? 'window' : 's360'),
+  fill: params.get('fill') === 'each' ? 'each' : 'mid',
+};
+function pushUrl() {
+  const p = new URLSearchParams();
+  p.set('variant', S.variant); p.set('palette', S.palette); p.set('n', S.n); p.set('cvd', S.cvd); p.set('shade', S.shade); p.set('device', S.device); p.set('fill', S.fill);
+  history.replaceState(null, '', '?' + p.toString());
+}
+const colours = () => PALETTES[S.palette].c.slice(0, S.n);
+const BODY = { cream: '#f3e6c8', tyre: '#3a3d42', hub: '#c9ccd1', interior: '#b8bcc2', chassis: '#7d838a', light: '#fff6c2', engine: '#8a9099' };
+const SYMBOLS = ['dot', 'triangle', 'square', 'star', 'plus', 'heart', 'ring', 'moon', 'bolt', 'drop'];
+const SHAPES = ['round', 'triangle', 'square', 'star', 'plus', 'hexagon'];
+const K = { margin: 10, boxGap: 10, boxPad: 6, boxSlotMax: 46, bufGap: 5, bufPad: 6, bufSlotMax: 52, bufToBox: 0.8, pinInSlot: 0.78, rowGap: 8 };
+const LV = { boxes: 3, cap: 3, buf: 6 };
+
+// ===================================================================
+// Colour maths (same as pin-palette-check.cjs)
+const SIMM = {
+  protan: [0.152286, 1.052583, -0.204868, 0.114503, 0.786281, 0.099216, -0.003882, -0.048116, 1.051998],
+  deutan: [0.367322, 0.860646, -0.227968, 0.280085, 0.672501, 0.047413, -0.01182, 0.04294, 0.968881],
+  tritan: [1.255528, -0.076749, -0.178779, -0.078411, 0.930809, 0.147602, 0.004733, 0.691367, 0.3039],
+  achroma: [0.2126, 0.7152, 0.0722, 0.2126, 0.7152, 0.0722, 0.2126, 0.7152, 0.0722],
+};
+const hex2rgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16) / 255);
+const lin = c => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+function oklab([r, g, b]) {
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b), m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b), s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+  return [0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s, 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s, 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s];
+}
+function simLab(hex, sim) {
+  let v = hex2rgb(hex).map(lin); const M = SIMM[sim];
+  if (M) v = [0, 1, 2].map(i => Math.min(1, Math.max(0, M[i * 3] * v[0] + M[i * 3 + 1] * v[1] + M[i * 3 + 2] * v[2])));
+  return oklab(v);
+}
+const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+const lightness = hex => oklab(hex2rgb(hex).map(lin))[0];
+const inkFor = hex => (lightness(hex) > 0.72 ? '#1b1b22' : '#ffffff');
+
+// ===================================================================
+// Babylon scene
+const V3 = BABYLON.Vector3;
+const canvas = $('c');
+const engine = new BABYLON.Engine(canvas, true, { stencil: true, antialias: true });
+const DPR = Math.min(2, window.devicePixelRatio || 1);
+engine.setHardwareScalingLevel(1 / DPR);
+const scene = new BABYLON.Scene(engine);
+scene.clearColor = BABYLON.Color4.FromHexString('#cfe8f3ff');
+const MODEL_LAYER = 0x1, HUD_LAYER = 0x2, FOV = 0.8;
+const modelCam = new BABYLON.FreeCamera('modelCam', new V3(0, 0, -14), scene);
+modelCam.fov = FOV; modelCam.minZ = 0.1; modelCam.inputs.clear(); modelCam.layerMask = MODEL_LAYER;
+const hudCam = new BABYLON.FreeCamera('hudCam', new V3(0, 0, -500), scene);
+hudCam.mode = BABYLON.Camera.ORTHOGRAPHIC_CAMERA; hudCam.setTarget(new V3(0, 0, 0)); hudCam.minZ = 1; hudCam.maxZ = 2000;
+hudCam.inputs.clear(); hudCam.layerMask = HUD_LAYER;
+scene.activeCameras = [modelCam, hudCam];
+const hemi = new BABYLON.HemisphericLight('h', new V3(0.2, 1, -0.4), scene); hemi.intensity = 0.85;
+const sun = new BABYLON.DirectionalLight('d', new V3(-0.4, -1, 0.7), scene); sun.intensity = 0.55;
+
+let mats = {};
+function mat(hex, emissive = 0.2) {
+  const key = S.shade + hex + emissive;
+  if (!mats[key]) {
+    let m;
+    if (S.shade === 'cel' && BABYLON.CellMaterial) {
+      m = new BABYLON.CellMaterial(key, scene); m.diffuseColor = BABYLON.Color3.FromHexString(hex); m.computeHighLevel = true;
+    } else {
+      m = new BABYLON.StandardMaterial(key, scene);
+      m.diffuseColor = BABYLON.Color3.FromHexString(hex); m.specularColor = new BABYLON.Color3(0.05, 0.05, 0.05);
+      m.emissiveColor = m.diffuseColor.scale(emissive);
+    }
+    mats[key] = m;
+  }
+  return mats[key];
+}
+function outline(m, w) { m.renderOutline = true; m.outlineWidth = w; m.outlineColor = new BABYLON.Color3(0.12, 0.12, 0.14); return m; }
+
+// ---- Symbols: drawn once per (symbol, ink) into a texture used as an opacity mask -----------
+const glyphMats = {};
+function drawGlyph(ctx, kind, cx, cy, r) {
+  ctx.beginPath();
+  const poly = pts => { pts.forEach(([x, y], i) => (i ? ctx.lineTo(cx + x * r, cy + y * r) : ctx.moveTo(cx + x * r, cy + y * r))); ctx.closePath(); ctx.fill(); };
+  const star = (n, ri) => poly(Array.from({ length: n * 2 }, (_, i) => { const a = -Math.PI / 2 + i * Math.PI / n, rr = i % 2 ? ri : 1; return [Math.cos(a) * rr, Math.sin(a) * rr]; }));
+  switch (kind) {
+    case 'dot': ctx.arc(cx, cy, r * 0.62, 0, Math.PI * 2); ctx.fill(); break;
+    case 'triangle': poly([[0, -0.95], [0.92, 0.7], [-0.92, 0.7]]); break;
+    case 'square': poly([[-0.7, -0.7], [0.7, -0.7], [0.7, 0.7], [-0.7, 0.7]]); break;
+    case 'star': star(5, 0.45); break;
+    case 'plus': { const t = 0.32; poly([[-t, -0.9], [t, -0.9], [t, -t], [0.9, -t], [0.9, t], [t, t], [t, 0.9], [-t, 0.9], [-t, t], [-0.9, t], [-0.9, -t], [-t, -t]]); break; }
+    case 'heart': ctx.moveTo(cx, cy + 0.85 * r); ctx.bezierCurveTo(cx - 1.3 * r, cy - 0.1 * r, cx - 0.6 * r, cy - 1.1 * r, cx, cy - 0.4 * r); ctx.bezierCurveTo(cx + 0.6 * r, cy - 1.1 * r, cx + 1.3 * r, cy - 0.1 * r, cx, cy + 0.85 * r); ctx.fill(); break;
+    case 'ring': ctx.lineWidth = r * 0.34; ctx.arc(cx, cy, r * 0.62, 0, Math.PI * 2); ctx.stroke(); break;
+    case 'moon': ctx.arc(cx, cy, r * 0.8, 0, Math.PI * 2); ctx.fill(); ctx.globalCompositeOperation = 'destination-out'; ctx.beginPath(); ctx.arc(cx + 0.42 * r, cy - 0.25 * r, r * 0.66, 0, Math.PI * 2); ctx.fill(); ctx.globalCompositeOperation = 'source-over'; break;
+    case 'bolt': poly([[0.15, -0.95], [-0.6, 0.12], [-0.05, 0.12], [-0.2, 0.95], [0.6, -0.15], [0.05, -0.15]]); break;
+    case 'drop': ctx.moveTo(cx, cy - 0.95 * r); ctx.bezierCurveTo(cx + 0.4 * r, cy - 0.35 * r, cx + 0.75 * r, cy, cx + 0.75 * r, cy + 0.25 * r); ctx.arc(cx, cy + 0.25 * r, 0.75 * r, 0, Math.PI); ctx.bezierCurveTo(cx - 0.75 * r, cy, cx - 0.4 * r, cy - 0.35 * r, cx, cy - 0.95 * r); ctx.fill(); break;
+  }
+}
+function glyphMat(kind, ink) {
+  const key = kind + ink;
+  if (!glyphMats[key]) {
+    const t = new BABYLON.DynamicTexture('g' + key, { width: 128, height: 128 }, scene, true);
+    const ctx = t.getContext(); ctx.clearRect(0, 0, 128, 128); ctx.fillStyle = ctx.strokeStyle = '#fff';
+    drawGlyph(ctx, kind, 64, 64, 50); t.hasAlpha = true; t.update();
+    const m = new BABYLON.StandardMaterial('gm' + key, scene);
+    m.diffuseColor = BABYLON.Color3.Black(); m.specularColor = BABYLON.Color3.Black();
+    m.emissiveColor = BABYLON.Color3.FromHexString(ink); m.disableLighting = true;
+    m.opacityTexture = t; m.backFaceCulling = false; m.zOffset = -2;
+    glyphMats[key] = m;
+  }
+  return glyphMats[key];
+}
+function glyphDataUrl(kind, ink, px = 64) {
+  const c = document.createElement('canvas'); c.width = c.height = px;
+  const ctx = c.getContext('2d'); ctx.fillStyle = ctx.strokeStyle = ink; drawGlyph(ctx, kind, px / 2, px / 2, px * 0.39);
+  return c.toDataURL();
+}
+
+// ---- Pin templates: the round Pin, and one per head shape for variant C --------------------
+const PIN_H = 0.22, PIN_D = 0.24;
+const templates = {};
+function shapeOutline(kind, n = 0) {
+  const P = (k, ri) => Array.from({ length: k * (ri ? 2 : 1) }, (_, i) => { const a = Math.PI / 2 + i * 2 * Math.PI / (k * (ri ? 2 : 1)), rr = ri && i % 2 ? ri : 1; return new V3(Math.cos(a) * rr, Math.sin(a) * rr, 0); });
+  switch (kind) {
+    case 'triangle': return P(3).map(v => v.scale(1.12));
+    case 'square': return P(4).map(v => v.scale(1.05));
+    case 'star': return P(5, 0.5).map(v => v.scale(1.15));
+    case 'plus': { const t = 0.36; return [[t, 1], [-t, 1], [-t, t], [-1, t], [-1, -t], [-t, -t], [-t, -1], [t, -1], [t, -t], [1, -t], [1, t], [t, t]].map(([x, y]) => new V3(x, y, 0)); }
+    case 'hexagon': return P(6);
+  }
+}
+function template(kind) {
+  if (templates[kind]) return templates[kind];
+  let m;
+  if (kind === 'round') {
+    m = BABYLON.MeshBuilder.CreateCylinder('pinT', { height: PIN_H, diameterTop: PIN_D, diameterBottom: 0.12, tessellation: 14 }, scene);
+    m.bakeTransformIntoVertices(BABYLON.Matrix.Translation(0, PIN_H / 2, 0));
+  } else {
+    const shape = shapeOutline(kind).map(v => v.scale(PIN_D / 2)); shape.push(shape[0]);
+    m = BABYLON.MeshBuilder.ExtrudeShapeCustom('pinT' + kind, { shape, path: [new V3(0, 0, 0), new V3(0, PIN_H, 0)], scaleFunction: (i, d) => 0.5 + 0.5 * d / PIN_H, rotationFunction: () => 0, cap: BABYLON.Mesh.CAP_ALL, sideOrientation: BABYLON.Mesh.DOUBLESIDE }, scene);
+  }
+  m.setEnabled(false); templates[kind] = m; return m;
+}
+// A Pin of colour index ci. onCar: whether the symbol cue applies on the car for this variant.
+function makePin(ci, layer, where) {
+  const [, hex] = colours()[ci];
+  const kind = S.variant === 'C' ? SHAPES[ci % SHAPES.length] : 'round';
+  const m = template(kind).clone('pin'); m.setEnabled(true); m.layerMask = layer;
+  m.material = mat(hex); outline(m, where === 'car' ? 0.02 : 0.02);
+  const symbol = S.variant === 'B' || (S.variant === 'D' && where !== 'car');
+  if (symbol) {
+    const d = BABYLON.MeshBuilder.CreateDisc('glyph', { radius: PIN_D * 0.4, tessellation: 24 }, scene);
+    d.rotation.x = Math.PI / 2; d.position.y = PIN_H + 0.003; d.parent = m; d.layerMask = layer;
+    d.material = glyphMat(SYMBOLS[ci], inkFor(hex));
+  }
+  return m;
+}
+
+// ---- The car (shapes and Sockets from the screen-layout prototype) -------------------------
+const modelRoot = new BABYLON.TransformNode('modelRoot', scene);
+modelRoot.rotationQuaternion = BABYLON.Quaternion.RotationYawPitchRoll(-0.65, 0.32, 0);
+const START_ROT = modelRoot.rotationQuaternion.clone();
+let carNode = null, CAR_R = 3;
+const C = BODY, UP = [0, 1, 0], L = [0, 0, -1], R = [0, 0, 1], BACK = [-1, 0, 0];
+const box = (s, p, c) => ({ k: 'box', s, p, c });
+const cylZ = (d, h, p, c) => ({ k: 'cyl', d, h, p, c, r: [Math.PI / 2, 0, 0] });
+const cylX = (d, h, p, c) => ({ k: 'cyl', d, h, p, c, r: [0, 0, Math.PI / 2] });
+const wheel = (x, z) => [cylZ(0.9, 0.3, [x, 0.45, z], C.tyre), cylZ(0.45, 0.32, [x, 0.45, z], C.hub)];
+const PARTS = [
+  { shapes: wheel(1.3, -0.98), sockets: [{ p: [1.3, 0.45, -1.14], n: L }] },
+  { shapes: wheel(1.3, 0.98), sockets: [{ p: [1.3, 0.45, 1.14], n: R }] },
+  { shapes: wheel(-1.3, -0.98), sockets: [{ p: [-1.3, 0.45, -1.14], n: L }] },
+  { shapes: wheel(-1.3, 0.98), sockets: [{ p: [-1.3, 0.45, 1.14], n: R }] },
+  { shapes: [box([1.25, 0.12, 1.7], [1.35, 1.18, 0], C.cream)], sockets: [{ p: [1.65, 1.24, 0.4], n: UP }, { p: [1.05, 1.24, -0.4], n: UP }] },
+  { shapes: [box([2.3, 0.12, 1.75], [-0.35, 1.98, 0], C.cream)], sockets: [{ p: [0.25, 2.04, 0.4], n: UP }, { p: [-0.95, 2.04, -0.4], n: UP }] },
+  { shapes: [box([1.7, 0.65, 0.1], [-0.3, 0.95, -0.86], C.cream)], sockets: [{ p: [-0.75, 1.02, -0.91], n: L }, { p: [0.15, 1.02, -0.91], n: L }] },
+  { shapes: [box([1.7, 0.65, 0.1], [-0.3, 0.95, 0.86], C.cream)], sockets: [{ p: [-0.75, 1.02, 0.91], n: R }, { p: [0.15, 1.02, 0.91], n: R }] },
+  { shapes: [box([0.1, 1.05, 1.7], [-1.55, 1.4, 0], C.cream)], sockets: [{ p: [-1.6, 1.8, 0.68], n: BACK }, { p: [-1.6, 1.0, -0.68], n: BACK }] },
+  { shapes: [cylX(0.8, 0.2, [-1.7, 1.4, 0], C.tyre), cylX(0.4, 0.22, [-1.71, 1.4, 0], C.hub)], sockets: [{ p: [-1.82, 1.4, 0.13], n: BACK }, { p: [-1.82, 1.4, -0.13], n: BACK }] },
+  { shapes: [cylZ(0.14, 1.7, [1.3, 0.45, 0], C.chassis)], sockets: [{ p: [1.3, 0.45, -0.8], n: L }, { p: [1.3, 0.45, 0.8], n: R }] },
+  { shapes: [cylZ(0.14, 1.7, [-1.3, 0.45, 0], C.chassis)], sockets: [{ p: [-1.3, 0.45, -0.8], n: L }, { p: [-1.3, 0.45, 0.8], n: R }] },
+  { shapes: [box([0.9, 0.4, 1.1], [1.35, 0.8, 0], C.engine)], sockets: [{ p: [1.1, 1.0, -0.3], n: UP }, { p: [1.35, 1.0, 0.3], n: UP }, { p: [1.6, 1.0, -0.1], n: UP }] },
+  { shapes: [box([0.5, 0.15, 0.5], [0.1, 0.75, -0.4], C.interior), box([0.12, 0.6, 0.5], [-0.15, 1.0, -0.4], C.interior)], sockets: [{ p: [0.25, 0.77, -0.65], n: L }, { p: [-0.15, 1.0, -0.65], n: L }] },
+  { shapes: [box([0.5, 0.15, 0.5], [0.1, 0.75, 0.4], C.interior), box([0.12, 0.6, 0.5], [-0.15, 1.0, 0.4], C.interior)], sockets: [{ p: [0.25, 0.77, 0.65], n: R }, { p: [-0.15, 1.0, 0.65], n: R }] },
+  { shapes: [{ k: 'torus', d: 0.4, t: 0.05, p: [0.5, 1.35, -0.4], c: C.tyre, r: [0, 0, 0.5] }, { k: 'cyl', d: 0.06, h: 0.45, p: [0.62, 1.15, -0.4], c: C.tyre, r: [0, 0, 0.6] }], sockets: [{ p: [0.5, 1.37, -0.4], n: UP }] },
+  { shapes: [box([0.5, 0.5, 1.45], [-1.15, 0.85, 0], C.interior)], sockets: [{ p: [-1.4, 0.95, 0.35], n: BACK }, { p: [-1.4, 0.95, -0.35], n: BACK }] },
+  { shapes: [box([4.0, 0.3, 1.6], [0, 0.45, 0], C.chassis), box([0.15, 0.55, 1.6], [1.95, 0.85, 0], C.cream),
+    ...[[0.75, -0.8], [0.75, 0.8], [-1.45, -0.8], [-1.45, 0.8]].map(([x, z]) => box([0.12, 0.75, 0.12], [x, 1.55, z], C.cream))], sockets: [] },
+  { shapes: [box([0.25, 0.3, 1.9], [2.1, 0.5, 0], C.chassis)], sockets: [] },
+  { shapes: [box([0.25, 0.3, 1.9], [-2.1, 0.5, 0], C.chassis)], sockets: [] },
+  { shapes: [cylX(0.3, 0.08, [2.04, 0.95, -0.55], C.light)], sockets: [] },
+  { shapes: [cylX(0.3, 0.08, [2.04, 0.95, 0.55], C.light)], sockets: [] },
+];
+function buildCar() {
+  if (carNode) carNode.dispose(false, false);
+  carNode = new BABYLON.TransformNode('car', scene); carNode.parent = modelRoot; carNode.position.y = -1.05;
+  // Deal the 30 Sockets across the colours in play, round-robin, then a seeded shuffle.
+  const total = PARTS.reduce((a, p) => a + p.sockets.length, 0);
+  const deck = Array.from({ length: total }, (_, i) => i % S.n);
+  let seed = 7; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  for (let i = deck.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [deck[i], deck[j]] = [deck[j], deck[i]]; }
+  let pi = 0; const up = new V3(0, 1, 0);
+  for (const part of PARTS) {
+    for (const s of part.shapes) {
+      let m;
+      if (s.k === 'box') m = BABYLON.MeshBuilder.CreateBox('s', { width: s.s[0], height: s.s[1], depth: s.s[2] }, scene);
+      else if (s.k === 'cyl') m = BABYLON.MeshBuilder.CreateCylinder('s', { diameter: s.d, height: s.h, tessellation: 32 }, scene);
+      else m = BABYLON.MeshBuilder.CreateTorus('s', { diameter: s.d, thickness: s.t, tessellation: 32 }, scene);
+      m.position.set(...s.p); if (s.r) m.rotation.set(...s.r);
+      m.material = mat(s.c); m.parent = carNode; outline(m, 0.015); m.layerMask = MODEL_LAYER;
+    }
+    for (const so of part.sockets) {
+      const m = makePin(deck[pi++], MODEL_LAYER, 'car'); m.parent = carNode; m.position.set(...so.p);
+      const n = new V3(...so.n), d = V3.Dot(up, n);
+      m.rotationQuaternion = d > 0.9999 ? BABYLON.Quaternion.Identity() : BABYLON.Quaternion.RotationAxis(V3.Cross(up, n).normalize(), Math.acos(d));
+    }
+  }
+  CAR_R = 0;
+  carNode.getChildMeshes().forEach(m => { m.computeWorldMatrix(true); m.getBoundingInfo().boundingBox.vectorsWorld.forEach(v => { CAR_R = Math.max(CAR_R, v.length()); }); });
+}
+
+// ---- HUD (Box row + Buffer), variant A layout from Screen layout and HUD ------------------
+const hudRoot = new BABYLON.TransformNode('hud', scene);
+function hudBox(x, y, w, h, depth, hex, em) {
+  const m = BABYLON.MeshBuilder.CreateBox('hb', { width: w, height: h, depth }, scene);
+  m.position.set(x + w / 2, -(y + h / 2), depth / 2);
+  m.material = mat(hex, em); m.parent = hudRoot; m.layerMask = HUD_LAYER; outline(m, 1.5);
+}
+function hudDisc(cx, cy, d, hex, glyph) {
+  const m = BABYLON.MeshBuilder.CreateCylinder('hd', { diameter: d, height: 2, tessellation: 24 }, scene);
+  m.rotation.x = Math.PI / 2; m.position.set(cx, -cy, -1);
+  m.material = mat(hex, 0.4); m.parent = hudRoot; m.layerMask = HUD_LAYER;
+  if (glyph) {
+    const g = BABYLON.MeshBuilder.CreateDisc('hg', { radius: d * 0.3, tessellation: 24 }, scene);
+    g.position.set(cx, -cy, -2.2); g.material = glyphMat(glyph.kind, glyph.ink); g.parent = hudRoot; g.layerMask = HUD_LAYER;
+  }
+}
+function hudPin(cx, cy, px, ci) {
+  const m = makePin(ci, HUD_LAYER, 'hud'); m.parent = hudRoot;
+  m.getChildMeshes().forEach(c => (c.layerMask = HUD_LAYER));
+  m.scaling.setAll(px / PIN_D); m.rotation.set(-Math.PI / 2 + 0.5, 0, 0);
+  m.position.set(cx, -cy - px * 0.12, -4);
+}
+const BOX_TINT = c => BABYLON.Color3.Lerp(BABYLON.Color3.FromHexString(c), BABYLON.Color3.White(), 0.55).toHexString();
+function boxSlotCentre(s, cap, x, y, slot) {
+  const cols = Math.ceil(cap / 2), row = s < cols ? 0 : 1, inRow = row === 0 ? cols : cap - cols, i = row === 0 ? s : s - cols;
+  return { cx: x + K.boxPad + (cols - inRow) * slot / 2 + slot * (i + 0.5), cy: y + K.boxPad + slot * (row + 0.5) };
+}
+let LO = null;
+function layout(W, H, ins, buf) {
+  const M = K.margin, col = { x: ins.l, y: ins.t, w: W - ins.l - ins.r, h: H - ins.t - ins.b };
+  const cols = Math.ceil(LV.cap / 2), rows = LV.cap > 1 ? 2 : 1, avail = col.w - 2 * M;
+  const boxW = Math.min((avail - K.boxGap * (LV.boxes - 1)) / LV.boxes, cols * K.boxSlotMax + 2 * K.boxPad);
+  const slot = (boxW - 2 * K.boxPad) / cols, boxH = rows * slot + 2 * K.boxPad, rowW = LV.boxes * boxW + (LV.boxes - 1) * K.boxGap;
+  const bslot = Math.min(K.bufSlotMax, slot * K.bufToBox, (avail - 2 * K.bufPad - K.bufGap * (buf - 1)) / buf);
+  const trayW = buf * bslot + (buf - 1) * K.bufGap + 2 * K.bufPad, trayH = bslot + 2 * K.bufPad;
+  let y = col.y + M;
+  const boxes = { x: col.x + (col.w - rowW) / 2, y, boxW, slot, boxH }; y += boxH + K.rowGap;
+  const buffer = { x: col.x + (col.w - trayW) / 2, y, slot: bslot, trayW, trayH }; y += trayH + M;
+  const by = col.y + col.h - M - 48;
+  return { W, H, ins, boxes, buffer, buf, model: { x: col.x, y, w: col.w, h: by - M - y }, by, col };
+}
+function buildHud() {
+  hudRoot.getChildMeshes().forEach(m => m.dispose());
+  const { boxes, buffer, buf } = LO, cs = colours();
+  const glyphOn = S.variant === 'B' || S.variant === 'D';
+  const boxFill = [1, 2, 0];
+  for (let i = 0; i < LV.boxes; i++) {
+    const hex = cs[i][1], x = boxes.x + i * (boxes.boxW + K.boxGap);
+    hudBox(x, boxes.y, boxes.boxW, boxes.boxH, 30, BOX_TINT(hex), 0.45);
+    const slotHex = BABYLON.Color3.FromHexString(hex).scale(0.75).toHexString();
+    for (let s = 0; s < LV.cap; s++) {
+      const { cx, cy } = boxSlotCentre(s, LV.cap, x, boxes.y, boxes.slot);
+      const empty = s >= boxFill[i];
+      hudDisc(cx, cy, boxes.slot * 0.82, slotHex, glyphOn && empty ? { kind: SYMBOLS[i], ink: BABYLON.Color3.FromHexString(slotHex).scale(0.55).toHexString() } : null);
+      if (S.variant === 'C' && empty) { // faint shape in the empty slot
+        const g = BABYLON.MeshBuilder.CreateDisc('hs', { radius: boxes.slot * 0.26, tessellation: 24 }, scene);
+        g.position.set(cx, -cy, -2.2); g.parent = hudRoot; g.layerMask = HUD_LAYER;
+        g.material = glyphMat({ round: 'dot', triangle: 'triangle', square: 'square', star: 'star', plus: 'plus', hexagon: 'dot' }[SHAPES[i % SHAPES.length]], BABYLON.Color3.FromHexString(slotHex).scale(0.55).toHexString());
+      }
+      if (!empty) hudPin(cx, cy, boxes.slot * K.pinInSlot, i);
+    }
+  }
+  hudBox(buffer.x, buffer.y, buffer.trayW, buffer.trayH, 30, '#5b6270', 0.3);
+  // Buffer contents: mid-level = 5 Pins of colours without an open Box first; "each" = one of every colour.
+  const bufPins = S.fill === 'each' ? cs.map((_, i) => i) : [3, 4, 0, 5, 3].map(k => k % S.n).map((k, j) => (S.n > 5 ? (LV.boxes + j) % S.n : k));
+  for (let s = 0; s < buf; s++) {
+    const cx = buffer.x + K.bufPad + buffer.slot * (s + 0.5) + K.bufGap * s, cy = buffer.y + buffer.trayH / 2;
+    hudDisc(cx, cy, buffer.slot * 0.86, s === buf - 1 && S.fill !== 'each' ? '#b5545a' : '#3c414b');
+    if (s < bufPins.length) hudPin(cx, cy, buffer.slot * K.pinInSlot, bufPins[s]);
+  }
+}
+
+// ===================================================================
+// Apply
+let zoom = 1;
+function currentScreen() {
+  const P = PRESETS[S.device];
+  if (P.real) { const cs = getComputedStyle($('probe')), px = k => parseFloat(cs[k]) || 0; return { W: innerWidth, H: innerHeight, ins: { t: px('paddingTop'), r: px('paddingRight'), b: px('paddingBottom'), l: px('paddingLeft') }, real: true }; }
+  return { W: P.w, H: P.h, ins: { t: P.t, r: 0, b: P.b, l: 0 }, P };
+}
+function apply(rebuild = true) {
+  const scr = currentScreen();
+  document.body.classList.toggle('real', !!scr.real);
+  document.body.classList.toggle('narrow', innerWidth < 900);
+  const stage = $('stage'), wrap = $('frameWrap');
+  if (!scr.real) {
+    stage.style.width = scr.W + 'px'; stage.style.height = scr.H + 'px';
+    const panelW = document.body.classList.contains('narrow') ? 0 : 420;
+    wrap.style.transform = `scale(${Math.min(1.25, (innerHeight - 90) / scr.H, (innerWidth - panelW - 60) / scr.W)})`;
+  } else wrap.style.transform = '';
+  Object.keys(CVDS).forEach(k => { stage.classList.toggle('cvd-' + k, S.cvd === k); $('swatches').classList.toggle('cvd-' + k, S.cvd === k); });
+  engine.resize();
+  LO = layout(scr.W, scr.H, scr.ins, S.fill === 'each' ? S.n : LV.buf);
+  hudCam.orthoLeft = 0; hudCam.orthoRight = scr.W; hudCam.orthoTop = 0; hudCam.orthoBottom = -scr.H;
+  if (rebuild) { buildCar(); }
+  buildHud(); placeModelCam(); buildOverlay(); swatches(); scores(); syncControls(); pushUrl();
+}
+function placeModelCam() {
+  const { W, H, model } = LO, f = Math.tan(FOV / 2), aspect = W / H;
+  const half = Math.atan(Math.max(0.01, Math.min(f * model.w / H, f * model.h / H)));
+  const d = CAR_R / Math.sin(half) / zoom;
+  const cx = ((model.x + model.w / 2) / W) * 2 - 1, cy = 1 - ((model.y + model.h / 2) / H) * 2;
+  const X = cx * d * f * aspect, Y = cy * d * f;
+  modelCam.position.set(-X, -Y, -d); modelCam.setTarget(new V3(-X, -Y, 0));
+}
+function buildOverlay() {
+  const ov = $('overlay'); ov.innerHTML = '';
+  const add = (html, r, cls = '') => { const d = document.createElement('div'); d.className = cls; d.style.cssText = `left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px`; d.innerHTML = html; ov.appendChild(d); return d; };
+  const c = LO.col;
+  add('↶ Undo', { x: c.x + 10, y: LO.by, w: 104, h: 48 }, 'gbtn dev');
+  add('⟲ Restart', { x: c.x + c.w - 130, y: LO.by, w: 120, h: 48 }, 'gbtn');
+  const t = add('PROTOTYPE · throwaway', { x: c.x + 6, y: LO.H - LO.ins.b - 14, w: 200, h: 12 }); t.id = 'tag';
+}
+function swatches() {
+  const host = $('swatches'); host.innerHTML = '';
+  colours().forEach(([n, hex], i) => {
+    const d = document.createElement('div'); d.style.background = hex; d.title = `${n} ${hex}`;
+    if (S.variant === 'B' || S.variant === 'D') d.style.backgroundImage = `url(${glyphDataUrl(SYMBOLS[i], inkFor(hex))})`, d.style.backgroundSize = '70%', d.style.backgroundRepeat = 'no-repeat', d.style.backgroundPosition = 'center';
+    else if (S.variant === 'C') { d.textContent = SHAPES[i % SHAPES.length]; d.style.color = inkFor(hex); d.style.fontSize = '8px'; }
+    host.appendChild(d);
+  });
+}
+function scores() {
+  const cs = colours(), body = Object.entries(BODY).filter(([k]) => !['hub', 'light'].includes(k));
+  const cls = v => (v >= 12 ? 'good' : v >= 7 ? 'meh' : 'bad');
+  let html = '<tr><th>Vision</th><th>Closest pair</th><th class="num">dist</th><th>Closest to body</th><th class="num">dist</th></tr>';
+  for (const sim of ['none', 'protan', 'deutan', 'tritan', 'achroma']) {
+    const Lb = cs.map(([, h]) => simLab(h, sim));
+    let min = 1e9, pair = '', bmin = 1e9, bpair = '';
+    for (let i = 0; i < cs.length; i++) {
+      for (let j = i + 1; j < cs.length; j++) { const d = dist(Lb[i], Lb[j]) * 100; if (d < min) { min = d; pair = cs[i][0] + ' / ' + cs[j][0]; } }
+      for (const [bn, bh] of body) { const d = dist(Lb[i], simLab(bh, sim)) * 100; if (d < bmin) { bmin = d; bpair = cs[i][0] + ' / ' + bn; } }
+    }
+    html += `<tr${S.cvd === sim ? ' style="font-weight:600"' : ''}><td>${CVDS[sim]}</td><td>${pair}</td><td class="num ${cls(min)}">${min.toFixed(1)}</td><td>${bpair}</td><td class="num ${cls(bmin)}">${bmin.toFixed(1)}</td></tr>`;
+  }
+  if (S.variant === 'C' && S.n > SHAPES.length) html += `<tr><td colspan="5" class="bad">Only ${SHAPES.length} head shapes: colours ${SHAPES.length + 1}–${S.n} repeat a shape.</td></tr>`;
+  $('scores').innerHTML = html;
+}
+
+// ===================================================================
+// Input: drag turns the car; pinch / wheel zoom 1×–2.2×.
+const pointers = new Map(); let pinchStart = null;
+canvas.addEventListener('pointerdown', e => { canvas.setPointerCapture(e.pointerId); pointers.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (pointers.size === 2) pinchStart = { d: pinchDist(), z: zoom }; });
+canvas.addEventListener('pointermove', e => {
+  const p = pointers.get(e.pointerId); if (!p) return;
+  const dx = e.clientX - p.x, dy = e.clientY - p.y; p.x = e.clientX; p.y = e.clientY;
+  if (pointers.size === 1) {
+    const qy = BABYLON.Quaternion.RotationAxis(new V3(0, 1, 0), -dx * 0.009), qx = BABYLON.Quaternion.RotationAxis(new V3(1, 0, 0), -dy * 0.009);
+    modelRoot.rotationQuaternion = qy.multiply(qx).multiply(modelRoot.rotationQuaternion);
+  } else if (pointers.size === 2 && pinchStart) setZoom(pinchStart.z * pinchDist() / pinchStart.d);
+});
+const up = e => { pointers.delete(e.pointerId); if (pointers.size < 2) pinchStart = null; };
+canvas.addEventListener('pointerup', up); canvas.addEventListener('pointercancel', up);
+canvas.addEventListener('wheel', e => { e.preventDefault(); setZoom(zoom * Math.exp(-e.deltaY * 0.0015)); }, { passive: false });
+function pinchDist() { const [a, b] = [...pointers.values()]; return Math.hypot(a.x - b.x, a.y - b.y) || 1; }
+function setZoom(z) { zoom = Math.max(1, Math.min(2.2, z)); placeModelCam(); }
+document.addEventListener('gesturestart', e => e.preventDefault());
+
+// ===================================================================
+// Controls
+function seg(id, values, key, labels, after) {
+  const host = $(id);
+  values.forEach((v, i) => {
+    const b = document.createElement('button'); b.textContent = labels[i]; b.dataset.v = v; b.dataset.key = key;
+    b.onclick = () => { S[key] = v; if (after) after(); apply(); }; host.appendChild(b);
+  });
+}
+const resetMats = () => { Object.values(mats).forEach(m => m.dispose()); mats = {}; };
+seg('segVariant', Object.keys(VARIANTS), 'variant', Object.entries(VARIANTS).map(([k, v]) => `${k} · ${v.name}`));
+seg('segPalette', Object.keys(PALETTES), 'palette', Object.values(PALETTES).map(p => p.name));
+seg('segCvd', Object.keys(CVDS), 'cvd', Object.values(CVDS));
+seg('segShade', ['lambert', 'cel'], 'shade', ['Lambert', 'Cel (toon bands)'], resetMats);
+seg('segFill', ['mid', 'each'], 'fill', ['Mid-level', 'One of each colour in the Buffer']);
+Object.entries(PRESETS).forEach(([k, p]) => { const o = document.createElement('option'); o.value = k; o.textContent = p.name; $('selDevice').appendChild(o); });
+Object.entries(CVDS).forEach(([k, n]) => { const o = document.createElement('option'); o.value = k; o.textContent = n; $('cvdQuick').appendChild(o); });
+$('selDevice').onchange = e => { S.device = e.target.value; zoom = 1; apply(); };
+$('cvdQuick').onchange = e => { S.cvd = e.target.value; apply(false); };
+$('nColours').oninput = e => { S.n = parseInt(e.target.value); apply(); };
+function syncControls() {
+  document.querySelectorAll('.seg button[data-v]').forEach(b => b.classList.toggle('on', S[b.dataset.key] === b.dataset.v));
+  $('selDevice').value = S.device; $('cvdQuick').value = S.cvd; $('nColours').value = S.n; $('nColoursLbl').textContent = S.n;
+  $('vlabel').textContent = `${S.variant} · ${VARIANTS[S.variant].name}`;
+  $('variantNote').textContent = VARIANTS[S.variant].note; $('paletteNote').textContent = PALETTES[S.palette].note;
+}
+const order = Object.keys(VARIANTS);
+const step = d => { S.variant = order[(order.indexOf(S.variant) + d + order.length) % order.length]; apply(); };
+$('prev').onclick = () => step(-1); $('next').onclick = () => step(1);
+$('panelToggle').onclick = () => document.body.classList.toggle('panelOpen');
+document.addEventListener('keydown', e => {
+  if (e.target.closest && e.target.closest('input,textarea,select,[contenteditable]')) return;
+  if (e.key === 'ArrowLeft') step(-1); else if (e.key === 'ArrowRight') step(1);
+});
+addEventListener('resize', () => apply(false));
+
+apply();
+engine.runRenderLoop(() => scene.render());
+</script>
+</body>
+</html>

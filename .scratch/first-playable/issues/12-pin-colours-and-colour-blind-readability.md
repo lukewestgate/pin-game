@@ -1,7 +1,7 @@
 # Pin colours and colour-blind readability
 
 Type: prototype
-Status: open
+Status: claimed
 Parent: ../map.md
 Blocked by: 02, 07
 
