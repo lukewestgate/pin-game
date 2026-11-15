@@ -1,0 +1,650 @@
+<!doctype html>
+<!--
+  PROTOTYPE · throwaway. Ticket: Screen layout and HUD (issues/11-screen-layout-and-hud.md).
+  Plan: three structurally different portrait layouts on one page, switched by ?variant=A|B|C
+  (bottom bar or ← →), plus device presets with simulated safe areas, a landscape/desktop
+  mode (?wide=column|spread), and level numbers (Boxes, Capacity, Buffer) read as inputs.
+  The Box row and Buffer are drawn in the Babylon scene by a second orthographic camera whose
+  units are CSS pixels (ADR 0002). Only text and buttons are DOM.
+  Pin colours are placeholders (exact hues belong to Pin colours and colour-blind readability).
+  Run: double-click, or for a phone:  python3 -m http.server 8000 --bind 0.0.0.0  in this folder,
+  then open http://<this-machine>:8000/screen-layout.prototype.html?device=window on the phone.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>PROTOTYPE: screen layout and HUD</title>
+<script>
+  window.onerror = (msg, src, line) => { const t = document.getElementById('tag'); if (t) { t.style.color = '#c00'; t.textContent = 'ERROR: ' + msg + ' (line ' + line + ')'; } };
+</script>
+<script src="https://cdn.babylonjs.com/babylon.js"></script>
+<style>
+  :root { --accent: #3e63dd; --ink: #1c2024; --muted: #60646c; --line: #e0e1e6; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; font: 14px/1.45 system-ui, sans-serif; color: var(--ink); background: #2b2f36; overscroll-behavior: none; }
+  body { display: flex; overflow: hidden; }
+  #desk { flex: 1; display: flex; align-items: center; justify-content: center; min-width: 0; }
+  #frameWrap { flex: none; transform-origin: center center; }
+  #stage { position: relative; overflow: hidden; background: #cfe8f3; border-radius: 28px; box-shadow: 0 0 0 10px #111, 0 10px 40px #0008; }
+  #stage.desktop { border-radius: 6px; box-shadow: 0 0 0 1px #000, 0 10px 40px #0008; }
+  body.real #desk { display: block; }
+  body.real #stage { position: fixed; inset: 0; width: 100vw !important; height: 100dvh !important; border-radius: 0; box-shadow: none; }
+  #c { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; outline: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  #overlay { position: absolute; inset: 0; pointer-events: none; }
+  #overlay > * { position: absolute; }
+  .region { border: 1.5px dashed; font: 10px/1 ui-monospace, monospace; padding: 2px 3px; }
+  .region.model { border-color: #3e63ddaa; color: #3e63dd; }
+  .region.boxes { border-color: #e5484daa; color: #c62a2f; }
+  .region.buffer { border-color: #30a46caa; color: #18794e; }
+  .region.chrome { border-color: #8e4ec6aa; color: #8e4ec6; }
+  .unsafe { background: repeating-linear-gradient(45deg, #e5484d33 0 6px, transparent 6px 12px); }
+  .letterbox { background: #a9cddd; }
+  .tray { background: #ffffffb0; border-top: 1px solid #0001; border-radius: 18px 18px 0 0; box-shadow: 0 -4px 16px #0001; }
+  .notch { background: #000; border-radius: 0 0 18px 18px; }
+  .island { background: #000; border-radius: 20px; }
+  .homebar { background: #000a; border-radius: 3px; }
+  #tag { position: absolute; font-size: 10px; color: #0007; pointer-events: none; }
+  /* DOM chrome: only text and buttons */
+  .gbtn { position: absolute; pointer-events: auto; font: 600 15px/1 system-ui, sans-serif; color: #1c2024; background: #fff; border: 0; border-radius: 12px; box-shadow: 0 2px 0 #0002, 0 1px 6px #0001; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+  .gbtn.round { border-radius: 50%; font-size: 20px; }
+  .gbtn.dev { background: #fff4c2; color: #6b4e00; font-weight: 500; font-size: 13px; }
+  .gbtn.dev.round { font-size: 12px; }
+  .banner { position: absolute; pointer-events: auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; }
+  .banner h2 { margin: 0; font: 800 30px/1.1 system-ui, sans-serif; color: #fff; text-shadow: 0 2px 0 #0003; letter-spacing: .01em; }
+  .banner p { margin: 0; color: #fffd; font-size: 14px; }
+  .banner .gbtn { position: static; padding: 12px 26px; font-size: 17px; }
+  .banner.card { background: #0005; }
+  .banner.card .inner { background: var(--bc); border-radius: 22px; padding: 22px 28px; display: flex; flex-direction: column; gap: 10px; align-items: center; box-shadow: 0 6px 0 #0002; }
+  .banner.strip { background: var(--bc); box-shadow: 0 4px 0 #0002; }
+  .banner.tray { background: var(--bc); border-radius: 18px 18px 0 0; }
+  /* dev panel + switcher (not part of the design under review) */
+  #panel { width: 400px; flex: none; height: 100dvh; overflow: auto; padding: 14px 16px 80px; background: #fff; }
+  body.real #panel, body.narrow #panel { position: fixed; inset: 0; width: auto; z-index: 20; display: none; }
+  body.panelOpen #panel { display: block; }
+  #panel h1 { font-size: 16px; margin: 0 0 4px; }
+  #panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 16px 0 6px; }
+  #panel p, #panel li { margin: 3px 0 6px; font-size: 13px; }
+  #panel ul { padding-left: 18px; margin: 4px 0; }
+  .muted { color: var(--muted); font-size: 12px; }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 5px 0; }
+  .seg button { font: inherit; font-size: 13px; padding: 5px 9px; border: 1px solid var(--line); background: #fff; border-radius: 6px; cursor: pointer; }
+  .seg button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+  select, input[type=number] { font: inherit; font-size: 13px; padding: 3px 5px; }
+  input[type=number] { width: 56px; }
+  table.read { border-collapse: collapse; font-size: 12px; width: 100%; }
+  table.read td { padding: 2px 4px; border-bottom: 1px solid #f0f0f3; }
+  table.read td:last-child { font-family: ui-monospace, monospace; text-align: right; }
+  .changed { background: #fff4c2; transition: background 1s; }
+  #switcher { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 30; display: flex; align-items: center; gap: 2px; background: #111d; color: #fff; padding: 4px; border-radius: 999px; box-shadow: 0 4px 16px #0006; font: 13px/1 system-ui, sans-serif; -webkit-user-select: none; user-select: none; }
+  #switcher button { font: inherit; color: #fff; background: transparent; border: 0; padding: 7px 11px; border-radius: 999px; cursor: pointer; }
+  #switcher button:hover { background: #fff2; }
+  #vlabel { padding: 0 6px; min-width: 190px; text-align: center; white-space: nowrap; }
+  body.real #switcher { bottom: calc(env(safe-area-inset-bottom) + 70px); opacity: .85; }
+  #probe { position: fixed; visibility: hidden; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+</style>
+</head>
+<body>
+<div id="desk">
+  <div id="frameWrap">
+    <div id="stage">
+      <canvas id="c"></canvas>
+      <div id="overlay"></div>
+    </div>
+  </div>
+</div>
+
+<div id="panel">
+  <h1>Screen layout and HUD · prototype</h1>
+  <p class="muted">Throwaway. Drag to turn the car, pinch or scroll to zoom. Pins can't be tapped here: this is only about where things sit and how big they are. Pin colours are placeholders.</p>
+
+  <h2>Variant (also ← → or the bottom bar)</h2>
+  <div class="row seg" id="segVariant"></div>
+  <p class="muted" id="variantNote"></p>
+
+  <h2>Screen</h2>
+  <div class="row"><select id="selDevice"></select></div>
+  <div class="row">
+    <label><input type="checkbox" id="chkRotate"> Landscape</label>
+    <label><input type="checkbox" id="chkSafe" checked> Simulate safe areas</label>
+  </div>
+  <div class="row seg" id="segWide"><span class="muted">Landscape / desktop:</span></div>
+
+  <h2>Level numbers (taken from the level, never hard-coded)</h2>
+  <div class="row">
+    Boxes <input type="number" id="nBoxes" min="1" max="6" value="3">
+    Capacity <input type="number" id="nCap" min="1" max="6" value="3">
+    Buffer <input type="number" id="nBuf" min="1" max="10" value="6">
+  </div>
+
+  <h2>Scene state</h2>
+  <div class="row seg" id="segFill"><span class="muted">Fill:</span></div>
+  <div class="row seg" id="segBanner"><span class="muted">Banner:</span></div>
+  <div class="row"><label><input type="checkbox" id="chkRegions"> Show regions and unsafe areas</label></div>
+
+  <h2>Model camera</h2>
+  <div class="row">Max zoom <input type="number" id="nZoom" min="1" max="4" step="0.1" value="2.2">× &nbsp; Fit margin <input type="number" id="nMargin" min="0.6" max="1.4" step="0.05" value="1.0"></div>
+  <p class="muted">The car's bounding sphere (about its turning centre) is fitted into the Model region, so no rotation ever clips it at zoom 1×. Zoom only moves the camera closer; there is no panning.</p>
+  <div class="row seg"><button id="bResetCam">Reset view</button></div>
+
+  <h2>Measured (CSS px)</h2>
+  <table class="read" id="read"></table>
+
+  <h2>What to judge</h2>
+  <ul>
+    <li>On the smallest phone (360 × 640): are the Box and Buffer Pins big enough to read colours at a glance, and is the car still big enough to aim at?</li>
+    <li>Boxes and Buffer: together at the top, split around the car, or together in a bottom tray?</li>
+    <li>Do the safe areas (notch, home bar) stay clear? Try iPhone 14 with “Show regions”.</li>
+    <li>Landscape and desktop: centred portrait column, or spread out with the car on the left?</li>
+    <li>Win and lose banners, Restart, and the dev-only Undo: placement and size.</li>
+    <li>Try Boxes 4, Buffer 8 or Capacity 4 to see the layout reflow.</li>
+  </ul>
+</div>
+
+<div id="switcher">
+  <button id="prev" title="Previous variant (←)">‹</button>
+  <span id="vlabel"></span>
+  <button id="next" title="Next variant (→)">›</button>
+  <button id="panelToggle" title="Settings">⚙</button>
+</div>
+<div id="probe"></div>
+
+<script>
+// ===================================================================
+// Config and URL state
+const $ = id => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+const VARIANTS = {
+  A: { name: 'Sorting on top', note: 'Box row, then Buffer, both at the top as in the glossary. The car fills the middle. Restart and the dev Undo sit in a thumb bar at the bottom.' },
+  B: { name: 'Car in between', note: 'Box row at the top, Buffer at the bottom near the thumb, car between them. Small text buttons in a top strip.' },
+  C: { name: 'Bottom tray', note: 'Everything you sort with sits in one tray at the bottom (Box row above the Buffer). The car gets the top, with round buttons floating over its corners.' },
+};
+const PRESETS = {
+  window: { name: 'This window (use on a real phone)', real: true },
+  s360: { name: 'Small Android · 360 × 640', w: 360, h: 640, t: 0, b: 0 },
+  se: { name: 'iPhone SE · 375 × 667', w: 375, h: 667, t: 20, b: 0 },
+  i14: { name: 'iPhone 14/15 · 390 × 844', w: 390, h: 844, t: 47, b: 34, notch: 'notch' },
+  max: { name: 'iPhone Pro Max · 430 × 932', w: 430, h: 932, t: 59, b: 34, notch: 'island' },
+  pixel: { name: 'Pixel 7 · 412 × 915', w: 412, h: 915, t: 0, b: 0 },
+  ipad: { name: 'iPad Air · 820 × 1180', w: 820, h: 1180, t: 24, b: 20 },
+  desk: { name: 'Desktop window · 1280 × 800', w: 1280, h: 800, t: 0, b: 0, desktop: true },
+};
+const S = {
+  variant: VARIANTS[params.get('variant')] ? params.get('variant') : 'A',
+  device: PRESETS[params.get('device')] ? params.get('device') : (innerWidth < 700 ? 'window' : 's360'),
+  rotate: params.get('land') === '1',
+  safe: true,
+  wide: params.get('wide') === 'spread' ? 'spread' : 'column',
+  boxes: 3, cap: 3, buf: 6,
+  fill: 'mid', banner: 'none', regions: false,
+  zoomMax: 2.2, margin: 1.0,
+};
+function pushUrl() {
+  const p = new URLSearchParams(location.search);
+  p.set('variant', S.variant); p.set('device', S.device);
+  S.rotate ? p.set('land', '1') : p.delete('land');
+  S.wide === 'spread' ? p.set('wide', 'spread') : p.delete('wide');
+  history.replaceState(null, '', '?' + p.toString());
+}
+const PIN_COLOURS = ['#e5484d', '#3e63dd', '#ffc53d', '#30a46c', '#8e4ec6']; // placeholders
+const BOX_TINT = c => BABYLON.Color3.Lerp(BABYLON.Color3.FromHexString(c), BABYLON.Color3.White(), 0.55).toHexString();
+
+// HUD sizing constants (CSS px). Developer constants in the real build.
+const K = {
+  margin: 10,       // outer margin inside the safe area
+  boxGap: 10, boxPad: 6, boxSlotMax: 46,
+  bufGap: 5, bufPad: 6, bufSlotMax: 52,
+  pinInSlot: 0.78,  // Pin head diameter / slot size
+  rowGap: 8,
+};
+
+// ===================================================================
+// Babylon scene: one perspective camera for the Model, one orthographic camera for the HUD.
+const V3 = BABYLON.Vector3;
+const canvas = $('c');
+const engine = new BABYLON.Engine(canvas, true, { stencil: true, antialias: true });
+const DPR = Math.min(2, window.devicePixelRatio || 1);
+engine.setHardwareScalingLevel(1 / DPR);
+const scene = new BABYLON.Scene(engine);
+scene.clearColor = BABYLON.Color4.FromHexString('#cfe8f3ff');
+const MODEL_LAYER = 0x1, HUD_LAYER = 0x2;
+const FOV = 0.8;
+const modelCam = new BABYLON.FreeCamera('modelCam', new V3(0, 0, -14), scene);
+modelCam.fov = FOV; modelCam.minZ = 0.1; modelCam.inputs.clear(); modelCam.layerMask = MODEL_LAYER;
+const hudCam = new BABYLON.FreeCamera('hudCam', new V3(0, 0, -500), scene);
+hudCam.mode = BABYLON.Camera.ORTHOGRAPHIC_CAMERA; hudCam.setTarget(new V3(0, 0, 0)); hudCam.minZ = 1; hudCam.maxZ = 2000;
+hudCam.inputs.clear(); hudCam.layerMask = HUD_LAYER;
+scene.activeCameras = [modelCam, hudCam];
+const hemi = new BABYLON.HemisphericLight('h', new V3(0.2, 1, -0.4), scene); hemi.intensity = 0.85;
+const sun = new BABYLON.DirectionalLight('d', new V3(-0.4, -1, 0.7), scene); sun.intensity = 0.55;
+
+const mats = {};
+function mat(hex, emissive = 0.2) {
+  const key = hex + emissive;
+  if (!mats[key]) {
+    const m = new BABYLON.StandardMaterial(key, scene);
+    m.diffuseColor = BABYLON.Color3.FromHexString(hex); m.specularColor = new BABYLON.Color3(0.05, 0.05, 0.05);
+    m.emissiveColor = m.diffuseColor.scale(emissive); mats[key] = m;
+  }
+  return mats[key];
+}
+function outline(m, w) { m.renderOutline = true; m.outlineWidth = w; m.outlineColor = new BABYLON.Color3(0.12, 0.12, 0.14); return m; }
+const PIN_H = 0.22, PIN_D = 0.24;
+const pinTemplate = BABYLON.MeshBuilder.CreateCylinder('pinT', { height: PIN_H, diameterTop: PIN_D, diameterBottom: 0.12, tessellation: 14 }, scene);
+pinTemplate.bakeTransformIntoVertices(BABYLON.Matrix.Translation(0, PIN_H / 2, 0)); pinTemplate.setEnabled(false);
+
+// ---- The car (shapes and Sockets copied from the animation prototype) ----------------------
+const modelRoot = new BABYLON.TransformNode('modelRoot', scene);   // turning centre
+modelRoot.rotationQuaternion = BABYLON.Quaternion.Identity();
+const carNode = new BABYLON.TransformNode('car', scene); carNode.parent = modelRoot; carNode.position.y = -1.05;
+(function buildCar() {
+  const C = { cream: '#f3e6c8', tyre: '#3a3d42', hub: '#c9ccd1', interior: '#b8bcc2', chassis: '#7d838a', light: '#fff6c2', engine: '#8a9099' };
+  const UP = [0, 1, 0], L = [0, 0, -1], R = [0, 0, 1], BACK = [-1, 0, 0];
+  const box = (s, p, c) => ({ k: 'box', s, p, c });
+  const cylZ = (d, h, p, c) => ({ k: 'cyl', d, h, p, c, r: [Math.PI / 2, 0, 0] });
+  const cylX = (d, h, p, c) => ({ k: 'cyl', d, h, p, c, r: [0, 0, Math.PI / 2] });
+  const wheel = (x, z) => [cylZ(0.9, 0.3, [x, 0.45, z], C.tyre), cylZ(0.45, 0.32, [x, 0.45, z], C.hub)];
+  const parts = [
+    { shapes: wheel(1.3, -0.98), sockets: [{ p: [1.3, 0.45, -1.14], n: L }] },
+    { shapes: wheel(1.3, 0.98), sockets: [{ p: [1.3, 0.45, 1.14], n: R }] },
+    { shapes: wheel(-1.3, -0.98), sockets: [{ p: [-1.3, 0.45, -1.14], n: L }] },
+    { shapes: wheel(-1.3, 0.98), sockets: [{ p: [-1.3, 0.45, 1.14], n: R }] },
+    { shapes: [box([1.25, 0.12, 1.7], [1.35, 1.18, 0], C.cream)], sockets: [{ p: [1.65, 1.24, 0.4], n: UP }, { p: [1.05, 1.24, -0.4], n: UP }] },
+    { shapes: [box([2.3, 0.12, 1.75], [-0.35, 1.98, 0], C.cream)], sockets: [{ p: [0.25, 2.04, 0.4], n: UP }, { p: [-0.95, 2.04, -0.4], n: UP }] },
+    { shapes: [box([1.7, 0.65, 0.1], [-0.3, 0.95, -0.86], C.cream)], sockets: [{ p: [-0.75, 1.02, -0.91], n: L }, { p: [0.15, 1.02, -0.91], n: L }] },
+    { shapes: [box([1.7, 0.65, 0.1], [-0.3, 0.95, 0.86], C.cream)], sockets: [{ p: [-0.75, 1.02, 0.91], n: R }, { p: [0.15, 1.02, 0.91], n: R }] },
+    { shapes: [box([0.1, 1.05, 1.7], [-1.55, 1.4, 0], C.cream)], sockets: [{ p: [-1.6, 1.8, 0.68], n: BACK }, { p: [-1.6, 1.0, -0.68], n: BACK }] },
+    { shapes: [cylX(0.8, 0.2, [-1.7, 1.4, 0], C.tyre), cylX(0.4, 0.22, [-1.71, 1.4, 0], C.hub)], sockets: [{ p: [-1.82, 1.4, 0.13], n: BACK }, { p: [-1.82, 1.4, -0.13], n: BACK }] },
+    { shapes: [cylZ(0.14, 1.7, [1.3, 0.45, 0], C.chassis)], sockets: [{ p: [1.3, 0.45, -0.8], n: L }, { p: [1.3, 0.45, 0.8], n: R }] },
+    { shapes: [cylZ(0.14, 1.7, [-1.3, 0.45, 0], C.chassis)], sockets: [{ p: [-1.3, 0.45, -0.8], n: L }, { p: [-1.3, 0.45, 0.8], n: R }] },
+    { shapes: [box([0.9, 0.4, 1.1], [1.35, 0.8, 0], C.engine)], sockets: [{ p: [1.1, 1.0, -0.3], n: UP }, { p: [1.35, 1.0, 0.3], n: UP }, { p: [1.6, 1.0, -0.1], n: UP }] },
+    { shapes: [box([0.5, 0.15, 0.5], [0.1, 0.75, -0.4], C.interior), box([0.12, 0.6, 0.5], [-0.15, 1.0, -0.4], C.interior)], sockets: [{ p: [0.25, 0.77, -0.65], n: L }, { p: [-0.15, 1.0, -0.65], n: L }] },
+    { shapes: [box([0.5, 0.15, 0.5], [0.1, 0.75, 0.4], C.interior), box([0.12, 0.6, 0.5], [-0.15, 1.0, 0.4], C.interior)], sockets: [{ p: [0.25, 0.77, 0.65], n: R }, { p: [-0.15, 1.0, 0.65], n: R }] },
+    { shapes: [{ k: 'torus', d: 0.4, t: 0.05, p: [0.5, 1.35, -0.4], c: C.tyre, r: [0, 0, 0.5] }, { k: 'cyl', d: 0.06, h: 0.45, p: [0.62, 1.15, -0.4], c: C.tyre, r: [0, 0, 0.6] }], sockets: [{ p: [0.5, 1.37, -0.4], n: UP }] },
+    { shapes: [box([0.5, 0.5, 1.45], [-1.15, 0.85, 0], C.interior)], sockets: [{ p: [-1.4, 0.95, 0.35], n: BACK }, { p: [-1.4, 0.95, -0.35], n: BACK }] },
+    { shapes: [box([4.0, 0.3, 1.6], [0, 0.45, 0], C.chassis), box([0.15, 0.55, 1.6], [1.95, 0.85, 0], C.cream),
+      ...[[0.75, -0.8], [0.75, 0.8], [-1.45, -0.8], [-1.45, 0.8]].map(([x, z]) => box([0.12, 0.75, 0.12], [x, 1.55, z], C.cream))], sockets: [] },
+    { shapes: [box([0.25, 0.3, 1.9], [2.1, 0.5, 0], C.chassis)], sockets: [] },
+    { shapes: [box([0.25, 0.3, 1.9], [-2.1, 0.5, 0], C.chassis)], sockets: [] },
+    { shapes: [cylX(0.3, 0.08, [2.04, 0.95, -0.55], C.light)], sockets: [] },
+    { shapes: [cylX(0.3, 0.08, [2.04, 0.95, 0.55], C.light)], sockets: [] },
+  ];
+  let seed = 7; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const deck = []; for (let k = 0; k < 5; k++) for (let j = 0; j < 6; j++) deck.push(k);
+  for (let i = deck.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [deck[i], deck[j]] = [deck[j], deck[i]]; }
+  let pi = 0;
+  const up = new V3(0, 1, 0);
+  for (const part of parts) {
+    for (const s of part.shapes) {
+      let m;
+      if (s.k === 'box') m = BABYLON.MeshBuilder.CreateBox('s', { width: s.s[0], height: s.s[1], depth: s.s[2] }, scene);
+      else if (s.k === 'cyl') m = BABYLON.MeshBuilder.CreateCylinder('s', { diameter: s.d, height: s.h, tessellation: 32 }, scene);
+      else m = BABYLON.MeshBuilder.CreateTorus('s', { diameter: s.d, thickness: s.t, tessellation: 32 }, scene);
+      m.position.set(...s.p); if (s.r) m.rotation.set(...s.r);
+      m.material = mat(s.c); m.parent = carNode; outline(m, 0.015); m.layerMask = MODEL_LAYER;
+    }
+    for (const so of part.sockets) {
+      const m = pinTemplate.clone('pin'); m.setEnabled(true); m.layerMask = MODEL_LAYER;
+      m.material = mat(PIN_COLOURS[deck[pi++]]); outline(m, 0.02); m.parent = carNode;
+      m.position.set(...so.p);
+      const n = new V3(...so.n), d = V3.Dot(up, n);
+      m.rotationQuaternion = d > 0.9999 ? BABYLON.Quaternion.Identity() : BABYLON.Quaternion.RotationAxis(V3.Cross(up, n).normalize(), Math.acos(d));
+    }
+  }
+})();
+const START_ROT = BABYLON.Quaternion.RotationYawPitchRoll(-0.65, 0.32, 0);
+modelRoot.rotationQuaternion.copyFrom(START_ROT);
+// Bounding sphere about the turning centre, including Pins.
+const CAR_R = (function () {
+  let r = 0;
+  carNode.getChildMeshes().forEach(m => {
+    m.computeWorldMatrix(true);
+    m.getBoundingInfo().boundingBox.vectorsWorld.forEach(v => { r = Math.max(r, v.length()); });
+  });
+  return r;
+})();
+
+// ---- HUD meshes, rebuilt on every layout --------------------------------------------------
+const hudRoot = new BABYLON.TransformNode('hud', scene);
+function hudBox(x, y, w, h, depth, hex, z = 0, em = 0.35) {
+  const m = BABYLON.MeshBuilder.CreateBox('hb', { width: w, height: h, depth }, scene);
+  m.position.set(x + w / 2, -(y + h / 2), z + depth / 2);
+  m.material = mat(hex, em); m.parent = hudRoot; m.layerMask = HUD_LAYER; outline(m, 1.5);
+  return m;
+}
+function hudDisc(cx, cy, d, hex) {
+  const m = BABYLON.MeshBuilder.CreateCylinder('hd', { diameter: d, height: 2, tessellation: 24 }, scene);
+  m.rotation.x = Math.PI / 2; m.position.set(cx, -cy, -1);
+  m.material = mat(hex, 0.4); m.parent = hudRoot; m.layerMask = HUD_LAYER;
+  return m;
+}
+function hudPin(cx, cy, px, hex) {
+  const m = pinTemplate.clone('hp'); m.setEnabled(true); m.layerMask = HUD_LAYER; m.parent = hudRoot;
+  const s = px / PIN_D; m.scaling.setAll(s);
+  m.rotation.set(-Math.PI / 2 + 0.5, 0, 0);
+  m.position.set(cx, -cy - px * 0.12, -2);
+  m.material = mat(hex); outline(m, 0.02);
+  return m;
+}
+function clearHud() { hudRoot.getChildMeshes().forEach(m => m.dispose()); }
+
+// ===================================================================
+// Layout: a pure function from screen size + safe insets + level numbers to rectangles (CSS px).
+function sizeBoxRow(avail, n, cap) {
+  const boxW = Math.min((avail - K.boxGap * (n - 1)) / n, cap * K.boxSlotMax + 2 * K.boxPad);
+  const slot = (boxW - 2 * K.boxPad) / cap;
+  return { boxW, slot, boxH: slot + 2 * K.boxPad, rowW: n * boxW + (n - 1) * K.boxGap };
+}
+function sizeBuffer(avail, b) {
+  const slot = Math.min(K.bufSlotMax, (avail - 2 * K.bufPad - K.bufGap * (b - 1)) / b);
+  return { slot, trayW: b * slot + (b - 1) * K.bufGap + 2 * K.bufPad, trayH: slot + 2 * K.bufPad };
+}
+function layout(W, H, ins, v, wide, lv) {
+  const M = K.margin;
+  const safe = { x: ins.l, y: ins.t, w: W - ins.l - ins.r, h: H - ins.t - ins.b };
+  const out = { W, H, ins, safe, letterbox: [], buttons: [], panels: [] };
+  const land = W > H;
+  let col = { ...safe };
+  const boxesIn = (x, w) => sizeBoxRow(w - 2 * M, lv.boxes, lv.cap);
+  const bufIn = (x, w) => sizeBuffer(w - 2 * M, lv.buf);
+  const centre = (x, w, inner) => x + (w - inner) / 2;
+
+  if (land && wide === 'spread') {
+    const hudW = Math.round(Math.min(440, Math.max(300, safe.w * 0.38)));
+    const hx = safe.x + safe.w - hudW;
+    const bx = boxesIn(hx, hudW), bf = bufIn(hx, hudW);
+    const stackH = bx.boxH + K.rowGap * 2 + bf.trayH;
+    let y = safe.y + Math.max(M, (safe.h - stackH - 60) / 2);
+    out.boxes = { x: centre(hx, hudW, bx.rowW), y, w: bx.rowW, h: bx.boxH, ...bx }; y += bx.boxH + K.rowGap * 2;
+    out.buffer = { x: centre(hx, hudW, bf.trayW), y, w: bf.trayW, h: bf.trayH, ...bf }; y += bf.trayH + 24;
+    out.buttons.push({ id: 'undo', x: centre(hx, hudW, 230), y, w: 110, h: 40, text: '↶ Undo', dev: true });
+    out.buttons.push({ id: 'restart', x: centre(hx, hudW, 230) + 120, y, w: 110, h: 40, text: '⟲ Restart' });
+    out.model = { x: safe.x, y: safe.y, w: safe.w - hudW, h: safe.h };
+    out.panels.push({ cls: 'tray', x: hx, y: safe.y, w: hudW + ins.r, h: H - safe.y, style: 'border-radius:18px 0 0 0' });
+    out.banner = { kind: 'card', ...out.model };
+    return out;
+  }
+  if (land) { // centred portrait column
+    const cw = Math.min(safe.w, Math.round(safe.h * 9 / 16));
+    col = { x: centre(safe.x, safe.w, cw), y: safe.y, w: cw, h: safe.h };
+    out.letterbox.push({ x: 0, y: 0, w: col.x, h: H }, { x: col.x + cw, y: 0, w: W - col.x - cw, h: H });
+  }
+  const bx = boxesIn(col.x, col.w), bf = bufIn(col.x, col.w);
+  const bottom = col.y + col.h;
+  if (v === 'A') {
+    let y = col.y + M;
+    out.boxes = { x: centre(col.x, col.w, bx.rowW), y, w: bx.rowW, h: bx.boxH, ...bx }; y += bx.boxH + K.rowGap;
+    out.buffer = { x: centre(col.x, col.w, bf.trayW), y, w: bf.trayW, h: bf.trayH, ...bf }; y += bf.trayH + M;
+    const barH = 48, by = bottom - M - barH;
+    out.buttons.push({ id: 'undo', x: col.x + M, y: by, w: 104, h: barH, text: '↶ Undo', dev: true });
+    out.buttons.push({ id: 'restart', x: col.x + col.w - M - 120, y: by, w: 120, h: barH, text: '⟲ Restart' });
+    out.model = { x: col.x, y, w: col.w, h: by - M - y };
+    out.banner = { kind: 'card', x: 0, y: 0, w: W, h: H };
+  } else if (v === 'B') {
+    const barH = 34;
+    out.buttons.push({ id: 'undo', x: col.x + M, y: col.y + 6, w: 78, h: barH, text: '↶ Undo', dev: true });
+    out.buttons.push({ id: 'restart', x: col.x + col.w - M - 96, y: col.y + 6, w: 96, h: barH, text: '⟲ Restart' });
+    let y = col.y + 6 + barH + K.rowGap;
+    out.boxes = { x: centre(col.x, col.w, bx.rowW), y, w: bx.rowW, h: bx.boxH, ...bx }; y += bx.boxH + M;
+    const bufY = bottom - M - bf.trayH;
+    out.buffer = { x: centre(col.x, col.w, bf.trayW), y: bufY, w: bf.trayW, h: bf.trayH, ...bf };
+    out.model = { x: col.x, y, w: col.w, h: bufY - M - y };
+    out.banner = { kind: 'strip', x: col.x, y: out.model.y + out.model.h * 0.32, w: col.w, h: 150 };
+  } else {
+    const trayH = M + bx.boxH + K.rowGap + bf.trayH + M + 4;
+    const ty = bottom - trayH;
+    let y = ty + M + 4;
+    out.boxes = { x: centre(col.x, col.w, bx.rowW), y, w: bx.rowW, h: bx.boxH, ...bx }; y += bx.boxH + K.rowGap;
+    out.buffer = { x: centre(col.x, col.w, bf.trayW), y, w: bf.trayW, h: bf.trayH, ...bf };
+    out.panels.push({ cls: 'tray', x: col.x, y: ty, w: col.w, h: H - ty });
+    const r = 44;
+    out.buttons.push({ id: 'undo', x: col.x + M, y: col.y + M, w: r, h: r, text: '↶', round: true, dev: true });
+    out.buttons.push({ id: 'restart', x: col.x + col.w - M - r, y: col.y + M, w: r, h: r, text: '⟲', round: true });
+    out.model = { x: col.x, y: col.y + M + r, w: col.w, h: ty - (col.y + M + r) };
+    out.banner = { kind: 'tray', x: col.x, y: ty, w: col.w, h: H - ty };
+  }
+  return out;
+}
+
+// ===================================================================
+// Apply the layout: frame, cameras, HUD meshes, DOM chrome, readout.
+let zoom = 1, LO = null;
+function currentScreen() {
+  const P = PRESETS[S.device];
+  if (P.real) {
+    const cs = getComputedStyle($('probe'));
+    const px = k => parseFloat(cs[k]) || 0;
+    return { W: innerWidth, H: innerHeight, ins: { t: px('paddingTop'), r: px('paddingRight'), b: px('paddingBottom'), l: px('paddingLeft') }, real: true };
+  }
+  let W = P.w, H = P.h, ins = S.safe ? { t: P.t, r: 0, b: P.b, l: 0 } : { t: 0, r: 0, b: 0, l: 0 };
+  if (S.rotate) { [W, H] = [H, W]; ins = S.safe ? { t: 0, l: P.notch ? P.t : 0, r: P.notch ? P.t : 0, b: P.b ? 21 : 0 } : ins; }
+  return { W, H, ins, P };
+}
+function apply() {
+  const scr = currentScreen();
+  document.body.classList.toggle('real', !!scr.real);
+  document.body.classList.toggle('narrow', innerWidth < 900);
+  const stage = $('stage'), wrap = $('frameWrap');
+  if (!scr.real) {
+    stage.style.width = scr.W + 'px'; stage.style.height = scr.H + 'px';
+    stage.classList.toggle('desktop', !!scr.P.desktop);
+    const panelW = document.body.classList.contains('narrow') ? 0 : 400;
+    const sc = Math.min(1, (innerHeight - 90) / scr.H, (innerWidth - panelW - 60) / scr.W);
+    wrap.style.transform = `scale(${sc})`;
+  } else { wrap.style.transform = ''; }
+  engine.resize();
+  const W = scr.W, H = scr.H;
+  LO = layout(W, H, scr.ins, S.variant, S.wide, { boxes: S.boxes, cap: S.cap, buf: S.buf });
+
+  // HUD camera: 1 world unit = 1 CSS px, origin top-left, y up (so rows sit at -y).
+  hudCam.position.set(0, 0, -500);
+  hudCam.orthoLeft = 0; hudCam.orthoRight = W; hudCam.orthoTop = 0; hudCam.orthoBottom = -H;
+  buildHud();
+  placeModelCam();
+  buildOverlay(scr);
+  readout(scr);
+  $('vlabel').textContent = `${S.variant} · ${VARIANTS[S.variant].name}`;
+  $('variantNote').textContent = VARIANTS[S.variant].note;
+  syncControls();
+  pushUrl();
+}
+function fitDistance() {
+  const { W, H, model } = LO;
+  const f = Math.tan(FOV / 2);
+  const tanY = f * model.h / H, tanX = f * model.w / H;
+  const half = Math.atan(Math.max(0.01, Math.min(tanX, tanY)));
+  return CAR_R * S.margin / Math.sin(half);
+}
+function placeModelCam() {
+  const { W, H, model } = LO;
+  const f = Math.tan(FOV / 2), aspect = W / H;
+  const d = fitDistance() / zoom;
+  // Shift the camera sideways so the turning centre projects to the Model region's centre.
+  const cx = ((model.x + model.w / 2) / W) * 2 - 1, cy = 1 - ((model.y + model.h / 2) / H) * 2;
+  const X = cx * d * f * aspect, Y = cy * d * f;
+  modelCam.position.set(-X, -Y, -d);
+  modelCam.setTarget(new V3(-X, -Y, 0));
+}
+function pinPxAt(d) { return PIN_D / (d * Math.tan(FOV / 2)) * (LO.H / 2); }
+
+function fillFor(lv) {
+  const clamp = (k, max) => Math.max(0, Math.min(k, max));
+  if (S.fill === 'start') return { boxes: Array(lv.boxes).fill(0), buffer: 0 };
+  if (S.fill === 'mid') return { boxes: Array.from({ length: lv.boxes }, (_, i) => clamp([1, 2, 0][i % 3], lv.cap - 1)), buffer: clamp(3, lv.buf - 1) };
+  return { boxes: Array.from({ length: lv.boxes }, (_, i) => clamp([2, 1, 2][i % 3], lv.cap - 1)), buffer: Math.max(0, lv.buf - 1) };
+}
+function buildHud() {
+  clearHud();
+  const { boxes, buffer } = LO;
+  const fill = fillFor({ boxes: S.boxes, cap: S.cap, buf: S.buf });
+  for (let i = 0; i < S.boxes; i++) {
+    const col = PIN_COLOURS[i % PIN_COLOURS.length];
+    const x = boxes.x + i * (boxes.boxW + K.boxGap);
+    hudBox(x, boxes.y, boxes.boxW, boxes.boxH, 30, BOX_TINT(col), 0, 0.45);
+    for (let s = 0; s < S.cap; s++) {
+      const cx = x + K.boxPad + boxes.slot * (s + 0.5), cy = boxes.y + boxes.boxH / 2;
+      hudDisc(cx, cy, boxes.slot * 0.82, BABYLON.Color3.FromHexString(col).scale(0.75).toHexString());
+      if (s < fill.boxes[i]) hudPin(cx, cy, boxes.slot * K.pinInSlot, col);
+    }
+  }
+  hudBox(buffer.x, buffer.y, buffer.trayW, buffer.trayH, 30, '#5b6270', 0, 0.3);
+  for (let s = 0; s < S.buf; s++) {
+    const cx = buffer.x + K.bufPad + buffer.slot * (s + 0.5) + K.bufGap * s, cy = buffer.y + buffer.trayH / 2;
+    const last = s === S.buf - 1;
+    hudDisc(cx, cy, buffer.slot * 0.86, last ? '#b5545a' : '#3c414b');
+    if (s < fill.buffer) hudPin(cx, cy, buffer.slot * K.pinInSlot, PIN_COLOURS[(S.boxes + s) % PIN_COLOURS.length]);
+  }
+}
+
+function el(cls, r, html = '', style = '') {
+  const d = document.createElement('div');
+  d.className = cls;
+  d.style.cssText = `left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px;${style}`;
+  d.innerHTML = html; return d;
+}
+function buildOverlay(scr) {
+  const ov = $('overlay'); ov.innerHTML = '';
+  // Panels are drawn under the canvas in the real build (a plane in the HUD scene); here as DOM
+  // with the canvas showing through. They must not catch pointer events.
+  LO.panels.forEach(p => ov.appendChild(el(p.cls, p, '', p.style || '')));
+  LO.letterbox.forEach(r => ov.appendChild(el('letterbox', r)));
+  // Fake device furniture.
+  if (!scr.real && S.safe && scr.P.notch) {
+    if (!S.rotate) {
+      if (scr.P.notch === 'notch') ov.appendChild(el('notch', { x: scr.W / 2 - 80, y: 0, w: 160, h: 30 }));
+      else ov.appendChild(el('island', { x: scr.W / 2 - 62, y: 11, w: 124, h: 36 }));
+      ov.appendChild(el('homebar', { x: scr.W / 2 - 68, y: scr.H - 13, w: 136, h: 5 }));
+    } else {
+      ov.appendChild(el('notch', { x: 0, y: scr.H / 2 - 80, w: 30, h: 160 }, '', 'border-radius:0 18px 18px 0'));
+      ov.appendChild(el('homebar', { x: scr.W / 2 - 68, y: scr.H - 9, w: 136, h: 5 }));
+    }
+  }
+  const tag = document.createElement('div'); tag.id = 'tag'; tag.textContent = 'PROTOTYPE · throwaway';
+  tag.style.cssText = `left:${LO.safe.x + 6}px;bottom:${LO.ins.b + 2}px`; ov.appendChild(tag);
+  // Buttons (DOM).
+  LO.buttons.forEach(b => {
+    const btn = document.createElement('button');
+    btn.className = 'gbtn' + (b.round ? ' round' : '') + (b.dev ? ' dev' : '');
+    btn.style.cssText = `left:${b.x}px;top:${b.y}px;width:${b.w}px;height:${b.h}px`;
+    btn.textContent = b.text; btn.title = b.dev ? 'Undo (debug tool)' : 'Restart level';
+    btn.onclick = () => flash(btn);
+    ov.appendChild(btn);
+  });
+  // Banner.
+  if (S.banner !== 'none') {
+    const win = S.banner === 'win', bc = win ? '#30a46c' : '#e5484d';
+    const title = win ? 'Car stripped!' : 'Buffer full';
+    const sub = win ? 'Every Pin sorted.' : 'No room left for that Pin.';
+    const btn = `<button class="gbtn" onclick="flash(this)">${win ? 'Play again' : '⟲ Try again'}</button>`;
+    const r = LO.banner;
+    const inner = r.kind === 'card' ? `<div class="inner"><h2>${title}</h2><p>${sub}</p>${btn}</div>` : `<h2>${title}</h2><p>${sub}</p>${btn}`;
+    ov.appendChild(el('banner ' + r.kind, r, inner, `--bc:${bc};padding-bottom:${r.kind === 'tray' ? LO.ins.b : 0}px`));
+  }
+  // Region guides.
+  if (S.regions) {
+    const { ins, W, H } = LO;
+    if (ins.t) ov.appendChild(el('unsafe', { x: 0, y: 0, w: W, h: ins.t }));
+    if (ins.b) ov.appendChild(el('unsafe', { x: 0, y: H - ins.b, w: W, h: ins.b }));
+    if (ins.l) ov.appendChild(el('unsafe', { x: 0, y: 0, w: ins.l, h: H }));
+    if (ins.r) ov.appendChild(el('unsafe', { x: W - ins.r, y: 0, w: ins.r, h: H }));
+    ov.appendChild(el('region model', LO.model, 'Model'));
+    ov.appendChild(el('region boxes', LO.boxes, 'Boxes'));
+    ov.appendChild(el('region buffer', LO.buffer, 'Buffer'));
+    // The circle the car's bounding sphere fills at zoom 1.
+    const m = LO.model, dia = Math.min(m.w, m.h) / S.margin;
+    ov.appendChild(el('', { x: m.x + (m.w - dia) / 2, y: m.y + (m.h - dia) / 2, w: dia, h: dia }, '', 'border:1px dotted #3e63dd;border-radius:50%'));
+  }
+}
+function flash(b) { b.style.transform = 'scale(.94)'; setTimeout(() => (b.style.transform = ''), 120); }
+
+let lastRead = {};
+function readout(scr) {
+  const r = n => Math.round(n);
+  const { W, H, model, boxes, buffer, ins } = LO;
+  const fd = fitDistance();
+  const rows = [
+    ['Screen', `${W} × ${H}`],
+    ['Safe insets t/r/b/l', `${r(ins.t)}/${r(ins.r)}/${r(ins.b)}/${r(ins.l)}`],
+    ['Device pixel ratio (capped)', DPR],
+    ['Box size', `${r(boxes.boxW)} × ${r(boxes.boxH)}`],
+    ['Box slot / Pin head in Box', `${r(boxes.slot)} / ${r(boxes.slot * K.pinInSlot)}`],
+    ['Buffer tray', `${r(buffer.trayW)} × ${r(buffer.trayH)}`],
+    ['Buffer slot / Pin head', `${r(buffer.slot)} / ${r(buffer.slot * K.pinInSlot)}`],
+    ['Model region', `${r(model.w)} × ${r(model.h)}`],
+    ['Model share of screen', `${r(100 * model.w * model.h / (W * H))}%`],
+    ['Car circle at 1× (diameter)', `${r(Math.min(model.w, model.h) / S.margin)}`],
+    ['Pin head on car at 1× / max', `${pinPxAt(fd).toFixed(1)} / ${pinPxAt(fd / S.zoomMax).toFixed(1)}`],
+    ['Current zoom', `${zoom.toFixed(2)}×`],
+  ];
+  $('read').innerHTML = rows.map(([k, v]) => `<tr><td>${k}</td><td class="${lastRead[k] !== undefined && lastRead[k] !== String(v) ? 'changed' : ''}">${v}</td></tr>`).join('');
+  lastRead = Object.fromEntries(rows.map(([k, v]) => [k, String(v)]));
+}
+
+// ===================================================================
+// Input: drag turns the car about its centre; pinch / wheel zoom. (Rough; tuning is another ticket.)
+const pointers = new Map(); let pinchStart = null;
+canvas.addEventListener('pointerdown', e => { canvas.setPointerCapture(e.pointerId); pointers.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (pointers.size === 2) pinchStart = { d: pinchDist(), z: zoom }; });
+canvas.addEventListener('pointermove', e => {
+  const p = pointers.get(e.pointerId); if (!p) return;
+  const dx = e.clientX - p.x, dy = e.clientY - p.y; p.x = e.clientX; p.y = e.clientY;
+  if (pointers.size === 1) {
+    const k = 0.009;
+    const qy = BABYLON.Quaternion.RotationAxis(new V3(0, 1, 0), -dx * k);
+    const qx = BABYLON.Quaternion.RotationAxis(new V3(1, 0, 0), -dy * k);
+    modelRoot.rotationQuaternion = qy.multiply(qx).multiply(modelRoot.rotationQuaternion);
+  } else if (pointers.size === 2 && pinchStart) { setZoom(pinchStart.z * pinchDist() / pinchStart.d); }
+});
+const up = e => { pointers.delete(e.pointerId); if (pointers.size < 2) pinchStart = null; };
+canvas.addEventListener('pointerup', up); canvas.addEventListener('pointercancel', up);
+canvas.addEventListener('wheel', e => { e.preventDefault(); setZoom(zoom * Math.exp(-e.deltaY * 0.0015)); }, { passive: false });
+function pinchDist() { const [a, b] = [...pointers.values()]; return Math.hypot(a.x - b.x, a.y - b.y) || 1; }
+function setZoom(z) { zoom = Math.max(1, Math.min(S.zoomMax, z)); placeModelCam(); readout(currentScreen()); }
+document.addEventListener('gesturestart', e => e.preventDefault()); // iOS Safari pinch-zoom of the page
+
+// ===================================================================
+// Controls
+function seg(id, values, key, labels) {
+  const host = $(id);
+  values.forEach((v, i) => {
+    const b = document.createElement('button'); b.textContent = labels ? labels[i] : v; b.dataset.v = v;
+    b.onclick = () => { S[key] = v; apply(); }; host.appendChild(b);
+  });
+}
+seg('segVariant', ['A', 'B', 'C'], 'variant', ['A · ' + VARIANTS.A.name, 'B · ' + VARIANTS.B.name, 'C · ' + VARIANTS.C.name]);
+seg('segWide', ['column', 'spread'], 'wide', ['Centred column', 'Spread']);
+seg('segFill', ['start', 'mid', 'danger'], 'fill', ['Start', 'Mid-level', 'Buffer nearly full']);
+seg('segBanner', ['none', 'win', 'lose'], 'banner', ['None', 'Win', 'Lose']);
+Object.entries(PRESETS).forEach(([k, p]) => { const o = document.createElement('option'); o.value = k; o.textContent = p.name; $('selDevice').appendChild(o); });
+$('selDevice').onchange = e => { S.device = e.target.value; zoom = 1; apply(); };
+$('chkRotate').onchange = e => { S.rotate = e.target.checked; apply(); };
+$('chkSafe').onchange = e => { S.safe = e.target.checked; apply(); };
+$('chkRegions').onchange = e => { S.regions = e.target.checked; apply(); };
+const num = (id, key, lo, hi) => ($(id).oninput = e => { const v = parseFloat(e.target.value); if (!isNaN(v)) { S[key] = Math.max(lo, Math.min(hi, v)); zoom = Math.min(zoom, S.zoomMax); apply(); } });
+num('nBoxes', 'boxes', 1, 6); num('nCap', 'cap', 1, 6); num('nBuf', 'buf', 1, 10); num('nZoom', 'zoomMax', 1, 4); num('nMargin', 'margin', 0.6, 1.4);
+$('bResetCam').onclick = () => { zoom = 1; modelRoot.rotationQuaternion.copyFrom(START_ROT); apply(); };
+function syncControls() {
+  document.querySelectorAll('.seg button[data-v]').forEach(b => {
+    const host = b.parentElement.id, key = { segVariant: 'variant', segWide: 'wide', segFill: 'fill', segBanner: 'banner' }[host];
+    b.classList.toggle('on', S[key] === b.dataset.v);
+  });
+  $('selDevice').value = S.device; $('chkRotate').checked = S.rotate; $('chkSafe').checked = S.safe; $('chkRegions').checked = S.regions;
+  $('chkRotate').disabled = $('chkSafe').disabled = !!PRESETS[S.device].real;
+}
+const order = Object.keys(VARIANTS);
+const step = d => { S.variant = order[(order.indexOf(S.variant) + d + order.length) % order.length]; apply(); };
+$('prev').onclick = () => step(-1); $('next').onclick = () => step(1);
+$('panelToggle').onclick = () => document.body.classList.toggle('panelOpen');
+document.addEventListener('keydown', e => {
+  if (e.target.closest && e.target.closest('input,textarea,select,[contenteditable]')) return;
+  if (e.key === 'ArrowLeft') step(-1); else if (e.key === 'ArrowRight') step(1);
+});
+addEventListener('resize', apply);
+addEventListener('orientationchange', () => setTimeout(apply, 200));
+
+apply();
+engine.runRenderLoop(() => scene.render());
+</script>
+</body>
+</html>
