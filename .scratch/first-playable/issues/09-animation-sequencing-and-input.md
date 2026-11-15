@@ -15,3 +15,7 @@ How do the event animations from one tap (`pinToBox` / `pinToBuffer`, `boxClosed
 - How does undo interrupt an animation that's playing?
 
 Rough Babylon prototype, built on the event list from Tech stack, so the feel can be judged in a browser.
+
+## Assets
+
+- [animation-sequencing.prototype.html](../prototypes/animation-sequencing.prototype.html): open it in a browser (loads Babylon from its CDN). It has a pure `Rules` port with structured events, a pure `Timeline` scheduler, and switchable sequencing and tap modes, timings and walkthroughs.

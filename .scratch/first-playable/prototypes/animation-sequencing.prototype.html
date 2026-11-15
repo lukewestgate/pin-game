@@ -1,0 +1,818 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>PROTOTYPE: animation sequencing and input</title>
+<script>
+  window.onerror = (msg, src, line) => { const t = document.getElementById('tag'); if (t) { t.style.color = '#c00'; t.textContent = 'ERROR: ' + msg + ' (line ' + line + ')'; } };
+</script>
+<script src="https://cdn.babylonjs.com/babylon.js"></script>
+<style>
+  :root { --accent: #3e63dd; --ink: #1c2024; --muted: #60646c; --line: #e0e1e6; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; font: 14px/1.45 system-ui, sans-serif; color: var(--ink); background: #f4f5f7; }
+  body { display: flex; justify-content: center; gap: 16px; }
+  #stage { position: relative; height: 100dvh; width: min(100vw, 56dvh); flex: none; background: #cfe8f3; overflow: hidden; }
+  #c { width: 100%; height: 100%; display: block; touch-action: none; outline: none; }
+  #banner { position: absolute; left: 0; right: 0; top: 38%; text-align: center; font-size: 28px; font-weight: 700; color: #fff; text-shadow: 0 2px 8px #0008; pointer-events: none; opacity: 0; transition: opacity .25s; }
+  #toast { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); background: #1c2024e0; color: #fff; padding: 4px 10px; border-radius: 6px; font-size: 12px; opacity: 0; transition: opacity .2s; pointer-events: none; white-space: nowrap; }
+  #bar { position: absolute; left: 8px; right: 8px; bottom: 8px; display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+  #bar button { font-size: 13px; }
+  #tag { position: absolute; left: 8px; top: 8px; font-size: 11px; color: #0008; pointer-events: none; }
+  button { font: inherit; padding: 6px 10px; border: 1px solid var(--line); background: #fff; border-radius: 6px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  #panel { width: 440px; height: 100dvh; overflow: auto; padding: 16px 18px 40px; background: #fff; border-left: 1px solid var(--line); }
+  #panelToggle { display: none; }
+  @media (max-width: 900px) {
+    #panel { position: fixed; inset: 0; width: auto; z-index: 5; display: none; }
+    #panel.open { display: block; }
+    #panelToggle { display: inline-block; }
+  }
+  h1 { font-size: 17px; margin: 0 0 6px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 18px 0 6px; }
+  p { margin: 4px 0 8px; }
+  .muted { color: var(--muted); font-size: 12px; }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 4px 0; }
+  .seg button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .grid { display: grid; grid-template-columns: 1fr 74px; gap: 3px 8px; align-items: center; }
+  .grid input { width: 74px; }
+  .state div { margin: 2px 0; }
+  .chip { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 4px; color: #fff; font-size: 12px; text-align: center; margin-right: 2px; }
+  .chip.empty { background: #e8e8ec; color: #999; }
+  #log { font: 12px/1.4 ui-monospace, monospace; background: #f7f7f9; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; max-height: 260px; overflow: auto; white-space: pre-wrap; }
+  .tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+  .tabs button.on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .scenario { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-top: 6px; }
+  .changed { background: #fff4c2; transition: background 1s; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="c"></canvas>
+  <div id="tag">PROTOTYPE · throwaway</div>
+  <div id="banner"></div>
+  <div id="toast"></div>
+  <div id="bar">
+    <button id="bUndo">Undo</button>
+    <button id="bHint">Next winning tap</button>
+    <button id="bRapid">Rapid-fire win</button>
+    <button id="bRestart">Restart</button>
+    <button id="panelToggle">Panel</button>
+  </div>
+</div>
+
+<aside id="panel">
+  <h1>Prototype: how one tap's animations play out</h1>
+  <p>One tap can set off a chain: the Pin flies to a Box or the Buffer, its Part may fall away, a full Box closes, a new one slides in, and matching Buffer Pins drain into it, sometimes closing that Box too. This prototype lets you <b>feel</b> different answers to four questions:</p>
+  <p class="muted">1. Does the chain play strictly one step at a time, or do steps overlap? 2. How long is each step, and how far apart do draining Pins leave? 3. What happens if you tap again before the chain finishes (ignored, queued, or played at once)? 4. What does Undo do to a chain that's still playing?</p>
+  <p class="muted">Drag to turn the car. Tap a Pin to remove it. The rules always decide the outcome straight away; only the animations wait. Shortcuts, not decisions: no zoom or Peek here, and the Box row and Buffer are fixed objects in the same scene instead of a second camera.</p>
+  <button id="panelClose" class="muted" style="display:none">Close panel</button>
+
+  <h2>Sequencing</h2>
+  <div class="row seg" id="segSeq">
+    <button data-v="strict">One after another</button>
+    <button data-v="overlap">Overlap where possible</button>
+  </div>
+  <p class="muted" id="seqHelp"></p>
+
+  <h2>Taps while animations play</h2>
+  <div class="row seg" id="segInput">
+    <button data-v="lock">Ignored</button>
+    <button data-v="queue">Queued</button>
+    <button data-v="ahead">Played at once</button>
+  </div>
+  <p class="muted" id="inputHelp"></p>
+
+  <h2>Timing</h2>
+  <div class="row">Speed <input id="speed" type="range" min="0.2" max="2" step="0.1" value="1"> <span id="speedOut">1.0×</span></div>
+  <div class="grid" id="timing"></div>
+  <div class="row"><span class="muted">Rapid-fire gap (ms)</span> <input id="rapidGap" type="number" value="160" style="width:70px"></div>
+
+  <h2>Guided walkthroughs</h2>
+  <div class="tabs" id="tabs"></div>
+  <div class="scenario" id="scenario"></div>
+
+  <h2>Current state</h2>
+  <div class="state" id="state"></div>
+
+  <h2>What was scheduled (ms after the tap)</h2>
+  <div id="log"></div>
+
+  <h2>Level</h2>
+  <div class="row">Deal seed <input id="dealSeed" type="number" value="1" style="width:60px"> Rule seed <input id="ruleSeed" type="number" value="1" style="width:60px"> <button id="bDeal">Deal</button></div>
+  <p class="muted">The first car: 30 Pins, 5 colours × 6, 3 Boxes, Capacity 3, Buffer 6. Colours are dealt like the Car level design sweep.</p>
+</aside>
+
+<!-- =================================================================== -->
+<script id="rules">
+// Pure rules port with structured events (Tech stack seam). No DOM.
+// Same rules as the sorting-rules prototype; the Buffer holds Pin indices
+// so rendering knows which mesh moves.
+var Rules = (function () {
+  const COLOURS = [
+    { name: 'Red', hex: '#e5484d' }, { name: 'Blue', hex: '#3e63dd' }, { name: 'Green', hex: '#30a46c' },
+    { name: 'Yellow', hex: '#f5c20a' }, { name: 'Purple', hex: '#8e4ec6' },
+  ];
+  function hash32(a, b) {
+    let h = (Math.imul(a | 0, 0x27d4eb2d) ^ Math.imul((b | 0) + 0x9e3779b9, 0x85ebca6b)) | 0;
+    h = Math.imul(h ^ (h >>> 16), 0x85ebca6b);
+    h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+    return (h ^ (h >>> 16)) >>> 0;
+  }
+  function rng(seed) {
+    let s = seed >>> 0;
+    return () => { s = (s + 0x6d2b79f5) | 0; let t = Math.imul(s ^ (s >>> 15), 1 | s); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  }
+  // raw: { boxes, capacity, bufferSize, seed, parts: [{ id }], pins: [{ colour, part, coveredBy: [part] }] }
+  function makeLevel(raw) {
+    const pinsOfPart = raw.parts.map((_, i) => raw.pins.map((p, j) => p.part === i ? j : -1).filter(j => j >= 0));
+    const colours = [...new Set(raw.pins.map(p => p.colour))].sort((a, b) => a - b);
+    return Object.assign({}, raw, { pinsOfPart, colours });
+  }
+  function initialState(L) {
+    const st = { removed: L.pins.map(() => false), partLeft: L.pinsOfPart.map(a => a.length), buffer: [], boxes: [], picks: 0, status: 'playing' };
+    for (let i = 0; i < L.boxes; i++) st.boxes.push({ colour: pickColour(L, st), fill: 0 });
+    return st;
+  }
+  function clone(st) {
+    return { removed: st.removed.slice(), partLeft: st.partLeft.slice(), buffer: st.buffer.slice(), boxes: st.boxes.map(b => ({ ...b })), picks: st.picks, status: st.status };
+  }
+  const isBlocked = (L, st, i) => L.pins[i].coveredBy.some(p => st.partLeft[p] > 0);
+  function legalTaps(L, st) {
+    if (st.status !== 'playing') return [];
+    const out = [];
+    for (let i = 0; i < L.pins.length; i++) if (!st.removed[i] && !isBlocked(L, st, i)) out.push(i);
+    return out;
+  }
+  function qualifying(L, st) {
+    const left = {}; L.colours.forEach(c => left[c] = 0);
+    L.pins.forEach((p, i) => { if (!st.removed[i]) left[p.colour]++; });
+    st.buffer.forEach(i => left[L.pins[i].colour]++);
+    const open = new Set(st.boxes.filter(b => b && b.colour !== null).map(b => b.colour));
+    const q = L.colours.filter(c => left[c] > 0 && !open.has(c));
+    const reach = q.filter(c => st.buffer.some(i => L.pins[i].colour === c) || L.pins.some((p, i) => p.colour === c && !st.removed[i] && !isBlocked(L, st, i)));
+    return reach.length ? reach : q; // reachable-first
+  }
+  function pickColour(L, st) {
+    const q = qualifying(L, st); const k = st.picks++;
+    return q.length ? q[hash32(L.seed, k) % q.length] : null;
+  }
+  function closeBox(L, st, slot, ev) {
+    ev.push({ type: 'boxClosed', slot, colour: st.boxes[slot].colour });
+    st.boxes[slot] = { colour: null, fill: 0 };
+    const c = pickColour(L, st);
+    st.boxes[slot] = { colour: c, fill: 0 };
+    ev.push({ type: 'boxOpened', slot, colour: c });
+    if (c === null) return;
+    const box = st.boxes[slot]; const pins = [];
+    while (box.fill < L.capacity) {
+      const j = st.buffer.findIndex(i => L.pins[i].colour === c);
+      if (j < 0) break;
+      pins.push({ pin: st.buffer.splice(j, 1)[0], fill: box.fill++ });
+    }
+    if (pins.length) ev.push({ type: 'bufferDrained', slot, pins, bufferAfter: st.buffer.slice() });
+    if (box.fill === L.capacity) closeBox(L, st, slot, ev);
+  }
+  // tap(level, state, pin) -> { state, events, error }. Never mutates its input.
+  function tap(L, st0, i) {
+    if (st0.status !== 'playing') return { state: st0, events: [], error: 'over' };
+    if (st0.removed[i]) return { state: st0, events: [], error: 'removed' };
+    if (isBlocked(L, st0, i)) return { state: st0, events: [], error: 'blocked' };
+    const st = clone(st0), ev = [], pin = L.pins[i];
+    st.removed[i] = true;
+    st.partLeft[pin.part]--;
+    const slot = st.boxes.findIndex(b => b.colour === pin.colour);
+    if (slot >= 0) ev.push({ type: 'pinToBox', pin: i, slot, fill: st.boxes[slot].fill++ });
+    else { st.buffer.push(i); ev.push({ type: 'pinToBuffer', pin: i, index: st.buffer.length - 1 }); }
+    if (st.partLeft[pin.part] === 0) ev.push({ type: 'partFell', part: pin.part });
+    if (slot < 0 && st.buffer.length >= L.bufferSize) { st.status = 'lost'; ev.push({ type: 'lost' }); return { state: st, events: ev }; }
+    if (slot >= 0 && st.boxes[slot].fill === L.capacity) closeBox(L, st, slot, ev);
+    if (st.removed.every(Boolean)) {
+      st.status = st.buffer.length === 0 ? 'won' : 'stuck';
+      ev.push({ type: st.status === 'won' ? 'won' : 'lost' });
+    }
+    return { state: st, events: ev };
+  }
+  // Winning tap order from st, or null. order: 'box-first' | a number (random seed).
+  function solve(L, st, order = 'box-first', budget = 150000) {
+    const seen = new Set(); let n = 0; const path = [];
+    const r = typeof order === 'number' ? rng(order) : null;
+    const key = s => s.removed.map(x => x ? 1 : 0).join('') + '|' + s.buffer.map(i => L.pins[i].colour).sort().join('') + '|' + s.boxes.map(b => b.colour + ':' + b.fill).join(',') + '|' + s.picks;
+    function dfs(s) {
+      if (s.status === 'won') return true;
+      if (s.status !== 'playing' || ++n > budget) return false;
+      const k = key(s); if (seen.has(k)) return false; seen.add(k);
+      let taps = legalTaps(L, s);
+      if (r) { for (let i = taps.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [taps[i], taps[j]] = [taps[j], taps[i]]; } }
+      else { const open = new Set(s.boxes.map(b => b.colour)); taps.sort((a, b) => open.has(L.pins[b].colour) - open.has(L.pins[a].colour)); }
+      for (const i of taps) { path.push(i); if (dfs(tap(L, s, i).state)) return true; path.pop(); }
+      return false;
+    }
+    return dfs(st) ? path : null;
+  }
+  return { COLOURS, rng, makeLevel, initialState, tap, legalTaps, isBlocked, solve };
+})();
+</script>
+
+<!-- =================================================================== -->
+<script id="timeline">
+// Pure animation scheduler. No DOM, no Babylon. Turns one tap's events into
+// timed steps; rendering only plays them. This is the part worth lifting.
+//
+// Tracks remember when each shared thing is free again:
+//   slots[s]  the Box in slot s is settled (no Pin landing, not closing or sliding in)
+//   buffer    the Buffer row is settled (no Pin landing, not compacting)
+//   all       every animation scheduled so far has finished ("busy until")
+var Timeline = (function () {
+  const DEFAULTS = { pull: 110, fly: 380, fall: 550, close: 340, open: 300, drainFly: 320, drainStagger: 90, compact: 160, endBeat: 250 };
+  const LABELS = {
+    pull: 'Pin pulls out of its Socket', fly: 'Pin flight to Box or Buffer', fall: 'Part falls away', close: 'Box closes and leaves',
+    open: 'Next Box slides in', drainFly: 'Buffer Pin flight to Box', drainStagger: 'Gap between draining Pins', compact: 'Buffer closes the gaps', endBeat: 'Pause before win/lose',
+  };
+  function emptyTracks() { return { all: 0, buffer: 0, slots: {} }; }
+  // opts: { sequencing: 'strict' | 'overlap', speed, timing }
+  function schedule(events, now, tracks0, opts) {
+    const T = {};
+    for (const k in DEFAULTS) T[k] = (opts.timing && opts.timing[k] != null ? opts.timing[k] : DEFAULTS[k]) / (opts.speed || 1);
+    const strict = opts.sequencing === 'strict';
+    const tr = { all: Math.max(now, tracks0.all), buffer: Math.max(now, tracks0.buffer), slots: Object.assign({}, tracks0.slots) };
+    const slot = s => Math.max(now, tr.slots[s] || 0);
+    let cursor = tr.all; // strict: the next step starts when everything before it has finished
+    let pulledAt = now;
+    const steps = [];
+    for (const ev of events) {
+      const st = Object.assign({}, ev, { T });
+      switch (ev.type) {
+        case 'pinToBox':
+        case 'pinToBuffer': {
+          // The pull-out starts at once (overlap) so the tap always feels answered;
+          // the flight is timed to land the moment its target is settled.
+          const ready = ev.type === 'pinToBox' ? slot(ev.slot) : tr.buffer;
+          st.t0 = strict ? cursor : now;
+          st.flyAt = Math.max(st.t0 + T.pull, ready - T.fly);
+          st.t1 = st.flyAt + T.fly;
+          pulledAt = st.t0 + T.pull;
+          if (ev.type === 'pinToBox') tr.slots[ev.slot] = st.t1; else tr.buffer = st.t1;
+          break;
+        }
+        case 'partFell':
+          st.t0 = strict ? cursor : pulledAt; // overlap: falls as soon as its last Pin is out
+          st.t1 = st.t0 + T.fall;
+          break;
+        case 'boxClosed':
+        case 'boxOpened':
+          st.t0 = strict ? cursor : slot(ev.slot);
+          st.t1 = st.t0 + (ev.type === 'boxClosed' ? T.close : T.open);
+          tr.slots[ev.slot] = st.t1;
+          break;
+        case 'bufferDrained':
+          st.t0 = strict ? cursor : Math.max(slot(ev.slot), tr.buffer);
+          st.lands = ev.pins.map((_, k) => st.t0 + k * T.drainStagger + T.drainFly);
+          st.landed = st.lands[st.lands.length - 1];
+          st.t1 = st.landed + T.compact;
+          tr.slots[ev.slot] = st.landed;
+          tr.buffer = st.t1;
+          break;
+        default: // won, lost: after everything settles
+          st.t0 = Math.max(cursor, tr.all, tr.buffer, ...Object.values(tr.slots)) + T.endBeat;
+          st.t1 = st.t0;
+      }
+      if (st.t1 > tr.all) tr.all = st.t1;
+      if (st.t1 > cursor) cursor = st.t1;
+      steps.push(st);
+    }
+    return { steps, tracks: tr };
+  }
+  return { DEFAULTS, LABELS, emptyTracks, schedule };
+})();
+</script>
+
+<!-- =================================================================== -->
+<script id="car">
+// The first car (Car level design ticket), rough primitives. x = front, y = up.
+var CAR = (function () {
+  const C = { cream: '#f3e6c8', tyre: '#3a3d42', hub: '#c9ccd1', interior: '#b8bcc2', chassis: '#7d838a', light: '#fff6c2', engine: '#8a9099' };
+  const UP = [0, 1, 0], L = [0, 0, -1], R = [0, 0, 1], BACK = [-1, 0, 0];
+  const box = (s, p, c) => ({ k: 'box', s, p, c });
+  const cylZ = (d, h, p, c) => ({ k: 'cyl', d, h, p, c, r: [Math.PI / 2, 0, 0] });
+  const cylX = (d, h, p, c) => ({ k: 'cyl', d, h, p, c, r: [0, 0, Math.PI / 2] });
+  const wheel = (x, z) => [cylZ(0.9, 0.3, [x, 0.45, z], C.tyre), cylZ(0.45, 0.32, [x, 0.45, z], C.hub)];
+  // Order of the first 17 Parts matches car-sweep.cjs so deal seeds give the same colours.
+  const parts = [
+    { id: 'wheel-fl', shapes: wheel(1.3, -0.98), sockets: [{ p: [1.3, 0.45, -1.14], n: L }] },
+    { id: 'wheel-fr', shapes: wheel(1.3, 0.98), sockets: [{ p: [1.3, 0.45, 1.14], n: R }] },
+    { id: 'wheel-rl', shapes: wheel(-1.3, -0.98), sockets: [{ p: [-1.3, 0.45, -1.14], n: L }] },
+    { id: 'wheel-rr', shapes: wheel(-1.3, 0.98), sockets: [{ p: [-1.3, 0.45, 1.14], n: R }] },
+    { id: 'bonnet', shapes: [box([1.25, 0.12, 1.7], [1.35, 1.18, 0], C.cream)], sockets: [{ p: [1.65, 1.24, 0.4], n: UP }, { p: [1.05, 1.24, -0.4], n: UP }] },
+    { id: 'roof', shapes: [box([2.3, 0.12, 1.75], [-0.35, 1.98, 0], C.cream)], sockets: [{ p: [0.25, 2.04, 0.4], n: UP }, { p: [-0.95, 2.04, -0.4], n: UP }] },
+    { id: 'door-l', shapes: [box([1.7, 0.65, 0.1], [-0.3, 0.95, -0.86], C.cream)], sockets: [{ p: [-0.75, 1.02, -0.91], n: L }, { p: [0.15, 1.02, -0.91], n: L }] },
+    { id: 'door-r', shapes: [box([1.7, 0.65, 0.1], [-0.3, 0.95, 0.86], C.cream)], sockets: [{ p: [-0.75, 1.02, 0.91], n: R }, { p: [0.15, 1.02, 0.91], n: R }] },
+    { id: 'tailgate', shapes: [box([0.1, 1.05, 1.7], [-1.55, 1.4, 0], C.cream)], sockets: [{ p: [-1.6, 1.8, 0.68], n: BACK }, { p: [-1.6, 1.0, -0.68], n: BACK }] },
+    { id: 'spare-wheel', shapes: [cylX(0.8, 0.2, [-1.7, 1.4, 0], C.tyre), cylX(0.4, 0.22, [-1.71, 1.4, 0], C.hub)], sockets: [{ p: [-1.82, 1.4, 0.13], n: BACK }, { p: [-1.82, 1.4, -0.13], n: BACK }] },
+    { id: 'axle-front', shapes: [cylZ(0.14, 1.7, [1.3, 0.45, 0], C.chassis)], sockets: [{ p: [1.3, 0.45, -0.8], n: L, under: 'wheel-fl' }, { p: [1.3, 0.45, 0.8], n: R, under: 'wheel-fr' }] },
+    { id: 'axle-rear', shapes: [cylZ(0.14, 1.7, [-1.3, 0.45, 0], C.chassis)], sockets: [{ p: [-1.3, 0.45, -0.8], n: L, under: 'wheel-rl' }, { p: [-1.3, 0.45, 0.8], n: R, under: 'wheel-rr' }] },
+    { id: 'engine', shapes: [box([0.9, 0.4, 1.1], [1.35, 0.8, 0], C.engine)], sockets: [{ p: [1.1, 1.0, -0.3], n: UP, under: 'bonnet' }, { p: [1.35, 1.0, 0.3], n: UP, under: 'bonnet' }, { p: [1.6, 1.0, -0.1], n: UP, under: 'bonnet' }] },
+    { id: 'seat-l', shapes: [box([0.5, 0.15, 0.5], [0.1, 0.75, -0.4], C.interior), box([0.12, 0.6, 0.5], [-0.15, 1.0, -0.4], C.interior)], sockets: [{ p: [0.25, 0.77, -0.65], n: L, under: 'door-l' }, { p: [-0.15, 1.0, -0.65], n: L, under: 'door-l' }] },
+    { id: 'seat-r', shapes: [box([0.5, 0.15, 0.5], [0.1, 0.75, 0.4], C.interior), box([0.12, 0.6, 0.5], [-0.15, 1.0, 0.4], C.interior)], sockets: [{ p: [0.25, 0.77, 0.65], n: R, under: 'door-r' }, { p: [-0.15, 1.0, 0.65], n: R, under: 'door-r' }] },
+    { id: 'steering-wheel', shapes: [{ k: 'torus', d: 0.4, t: 0.05, p: [0.5, 1.35, -0.4], c: C.tyre, r: [0, 0, 0.5] }, { k: 'cyl', d: 0.06, h: 0.45, p: [0.62, 1.15, -0.4], c: C.tyre, r: [0, 0, 0.6] }], sockets: [{ p: [0.5, 1.37, -0.4], n: UP, under: 'roof' }] },
+    { id: 'rear-seat', shapes: [box([0.5, 0.5, 1.45], [-1.15, 0.85, 0], C.interior)], sockets: [{ p: [-1.4, 0.95, 0.35], n: BACK, under: 'tailgate' }, { p: [-1.4, 0.95, -0.35], n: BACK, under: 'tailgate' }] },
+    // Cores: hold no Pins, never fall.
+    { id: 'chassis', core: true, shapes: [box([4.0, 0.3, 1.6], [0, 0.45, 0], C.chassis), box([0.15, 0.55, 1.6], [1.95, 0.85, 0], C.cream),
+      ...[[0.75, -0.8], [0.75, 0.8], [-1.45, -0.8], [-1.45, 0.8]].map(([x, z]) => box([0.12, 0.75, 0.12], [x, 1.55, z], C.cream))], sockets: [] },
+    { id: 'bumper-front', core: true, shapes: [box([0.25, 0.3, 1.9], [2.1, 0.5, 0], C.chassis)], sockets: [] },
+    { id: 'bumper-rear', core: true, shapes: [box([0.25, 0.3, 1.9], [-2.1, 0.5, 0], C.chassis)], sockets: [] },
+    { id: 'headlight-l', core: true, shapes: [cylX(0.3, 0.08, [2.04, 0.95, -0.55], C.light)], sockets: [] },
+    { id: 'headlight-r', core: true, shapes: [cylX(0.3, 0.08, [2.04, 0.95, 0.55], C.light)], sockets: [] },
+  ];
+  // Colour deal, as in car-sweep.cjs: (a) no Part all one colour, (b) every colour has an outer Pin.
+  function deal(seed, sockets) {
+    const r = Rules.rng(seed);
+    for (;;) {
+      const c = []; for (let k = 0; k < 5; k++) for (let j = 0; j < 6; j++) c.push(k);
+      for (let i = c.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [c[i], c[j]] = [c[j], c[i]]; }
+      const byPart = {}; sockets.forEach((s, i) => (byPart[s.part] = byPart[s.part] || []).push(c[i]));
+      if (Object.values(byPart).some(a => a.length > 1 && a.every(x => x === a[0]))) continue;
+      const outer = new Set(sockets.filter(s => !s.under).map((s, i) => c[sockets.indexOf(s)]));
+      if ([0, 1, 2, 3, 4].some(k => !outer.has(k))) continue;
+      return c;
+    }
+  }
+  function level(dealSeed, ruleSeed) {
+    const ids = parts.map(p => p.id);
+    const sockets = [];
+    parts.forEach((p, pi) => p.sockets.forEach(s => sockets.push({ part: pi, under: s.under })));
+    const colours = deal(dealSeed, sockets);
+    return Rules.makeLevel({
+      boxes: 3, capacity: 3, bufferSize: 6, seed: ruleSeed,
+      parts: parts.map(p => ({ id: p.id })),
+      pins: sockets.map((s, i) => ({ colour: colours[i], part: s.part, coveredBy: s.under ? [ids.indexOf(s.under)] : [] })),
+    });
+  }
+  return { parts, level };
+})();
+</script>
+
+<!-- =================================================================== -->
+<script>
+// Throwaway shell: Babylon scene + panel. Plays Timeline steps; never decides outcomes.
+const $ = id => document.getElementById(id);
+const V3 = BABYLON.Vector3, Q = BABYLON.Quaternion;
+const canvas = $('c');
+const engine = new BABYLON.Engine(canvas, true, { stencil: true, antialias: true });
+engine.setHardwareScalingLevel(1 / Math.min(2, window.devicePixelRatio || 1));
+const scene = new BABYLON.Scene(engine);
+scene.clearColor = BABYLON.Color4.FromHexString('#cfe8f3ff');
+const camera = new BABYLON.FreeCamera('cam', new V3(0, 0, -14), scene);
+camera.setTarget(V3.Zero()); camera.fov = 0.8; camera.inputs.clear();
+new BABYLON.HemisphericLight('h', new V3(0.2, 1, -0.4), scene).intensity = 0.85;
+const sun = new BABYLON.DirectionalLight('d', new V3(-0.4, -1, 0.7), scene); sun.intensity = 0.55;
+const modelRoot = new BABYLON.TransformNode('model', scene);
+modelRoot.position.set(0, 2.1, 0); modelRoot.rotation.set(0.32, -0.65, 0);
+const hudRoot = new BABYLON.TransformNode('hud', scene);
+hudRoot.position.set(0, 0, -6); // 8 units from the camera
+const HUD_HALF_H = 8 * Math.tan(0.4);
+const BUF_Y = -1.35, BOX_Y = -2.45, HUD_PIN = 0.7;
+
+const mats = {};
+function mat(hex) {
+  if (!mats[hex]) {
+    const m = new BABYLON.StandardMaterial(hex, scene);
+    m.diffuseColor = BABYLON.Color3.FromHexString(hex); m.specularColor = new BABYLON.Color3(0.06, 0.06, 0.06);
+    m.emissiveColor = m.diffuseColor.scale(0.2); mats[hex] = m;
+  }
+  return mats[hex];
+}
+function outline(m, w = 0.02) { m.renderOutline = true; m.outlineWidth = w; m.outlineColor = new BABYLON.Color3(0.12, 0.12, 0.14); return m; }
+const PIN_H = 0.22;
+const pinTemplate = BABYLON.MeshBuilder.CreateCylinder('pinT', { height: PIN_H, diameterTop: 0.24, diameterBottom: 0.12, tessellation: 14 }, scene);
+pinTemplate.bakeTransformIntoVertices(BABYLON.Matrix.Translation(0, PIN_H / 2, 0)); pinTemplate.setEnabled(false);
+function quatFromUp(n) {
+  const up = new V3(0, 1, 0), d = V3.Dot(up, n);
+  if (d > 0.9999) return Q.Identity();
+  if (d < -0.9999) return Q.RotationAxis(new V3(1, 0, 0), Math.PI);
+  return Q.RotationAxis(V3.Cross(up, n).normalize(), Math.acos(d));
+}
+function shapeMesh(s, parent) {
+  let m;
+  if (s.k === 'box') m = BABYLON.MeshBuilder.CreateBox('s', { width: s.s[0], height: s.s[1], depth: s.s[2] }, scene);
+  else if (s.k === 'cyl') m = BABYLON.MeshBuilder.CreateCylinder('s', { diameter: s.d, height: s.h, tessellation: 32 }, scene);
+  else m = BABYLON.MeshBuilder.CreateTorus('s', { diameter: s.d, thickness: s.t, tessellation: 32 }, scene);
+  m.position.set(...s.p); if (s.r) m.rotation.set(...s.r);
+  m.material = mat(s.c); m.parent = parent; m.isPickable = true; outline(m, 0.015);
+  return m;
+}
+function makePin(i) {
+  const m = pinTemplate.clone('pin' + i); m.setEnabled(true);
+  m.material = mat(Rules.COLOURS[L.pins[i].colour].hex); outline(m);
+  m.metadata = { pin: i, onModel: false };
+  return m;
+}
+
+// ---- HUD layout ---------------------------------------------------------
+let hud = {};
+function hudLayout() {
+  const aspect = engine.getRenderWidth() / engine.getRenderHeight();
+  const halfW = HUD_HALF_H * aspect;
+  hud.boxStep = Math.min(1.15, (2 * halfW - 0.15) / L.boxes);
+  hud.trayW = hud.boxStep * 0.9;
+  hud.bufStep = Math.min(0.5, (2 * halfW - 0.2) / L.bufferSize);
+}
+const boxPos = s => new V3((s - (L.boxes - 1) / 2) * hud.boxStep, BOX_Y, 0);
+const bufPos = k => new V3((k - (L.bufferSize - 1) / 2) * hud.bufStep, BUF_Y - 0.08, -0.12);
+const trayPinLocal = f => new V3((f - (L.capacity - 1) / 2) * Math.min(0.3, hud.trayW / (L.capacity + 0.4)), -0.1, -0.22);
+function makeTray(colour) {
+  const t = new BABYLON.TransformNode('tray', scene); t.parent = hudRoot;
+  const hex = colour === null ? '#9aa0a6' : Rules.COLOURS[colour].hex;
+  const body = BABYLON.MeshBuilder.CreateBox('trayBody', { width: hud.trayW, height: 0.4, depth: 0.3 }, scene);
+  body.material = mat(hex); body.parent = t; outline(body); body.isPickable = false;
+  if (colour !== null) for (let f = 0; f < L.capacity; f++) {
+    const h = BABYLON.MeshBuilder.CreateCylinder('hole', { diameter: 0.16, height: 0.02, tessellation: 16 }, scene);
+    h.rotation.x = Math.PI / 2; h.position = trayPinLocal(f).add(new V3(0, 0.12, 0.05)); h.material = mat('#1c2024'); h.parent = t; h.isPickable = false;
+  }
+  return t;
+}
+const worldOf = (node, local) => { node.computeWorldMatrix(true); return V3.TransformCoordinates(local, node.getWorldMatrix()); };
+
+// ---- Game state -----------------------------------------------------------
+let L, state, initState, history, tracks, queue, tweens, stats, pinMesh, partNode, slotTray, interestingPath, runId = 0;
+const opts = { sequencing: 'overlap', input: 'ahead', speed: 1, timing: Object.assign({}, Timeline.DEFAULTS) };
+
+function newLevel() {
+  L = CAR.level(+$('dealSeed').value || 1, +$('ruleSeed').value || 1);
+  initState = Rules.initialState(L);
+  interestingPath = null;
+  for (let s = 1; s <= 40 && !interestingPath; s++) {
+    const p = Rules.solve(L, initState, s);
+    if (!p) continue;
+    let st = initState, drains = 0;
+    for (const i of p) { const r = Rules.tap(L, st, i); st = r.state; drains += r.events.some(e => e.type === 'bufferDrained'); }
+    if (drains >= 2) interestingPath = p;
+  }
+  interestingPath = interestingPath || Rules.solve(L, initState);
+  restart();
+}
+function restart() {
+  runId++; state = initState; history = []; stats = { ignored: 0, queuedTotal: 0, blocked: 0 };
+  resetVisuals(); logLines = []; renderLog(); renderState();
+}
+function resetVisuals() {
+  tweens = []; queue = []; tracks = Timeline.emptyTracks();
+  [...modelRoot.getChildren(), ...hudRoot.getChildren()].forEach(n => n.dispose());
+  scene.meshes.filter(m => m.metadata && m.metadata.pin != null && !m.parent).forEach(m => m.dispose());
+  scene.transformNodes.filter(n => (n.name === 'tray' || n.name === 'part') && !n.parent).forEach(n => n.dispose());
+  hudLayout();
+  partNode = []; pinMesh = []; slotTray = [];
+  CAR.parts.forEach((p, pi) => {
+    const fallen = !p.core && state.partLeft[pi] === 0;
+    if (fallen) return;
+    const node = new BABYLON.TransformNode('part', scene); node.parent = modelRoot; partNode[pi] = node;
+    p.shapes.forEach(s => shapeMesh(s, node));
+  });
+  let i = 0;
+  CAR.parts.forEach((p, pi) => p.sockets.forEach(s => {
+    if (!state.removed[i]) {
+      const m = makePin(i); m.parent = partNode[pi];
+      m.position.set(...s.p); m.rotationQuaternion = quatFromUp(new V3(...s.n));
+      m.metadata.onModel = true; m.metadata.normal = new V3(...s.n);
+    }
+    i++;
+  }));
+  for (let k = 0; k < L.bufferSize; k++) {
+    const d = BABYLON.MeshBuilder.CreateCylinder('bufSlot', { diameter: Math.min(0.4, hud.bufStep * 0.85), height: 0.04, tessellation: 24 }, scene);
+    d.rotation.x = Math.PI / 2; d.position = new V3(bufPos(k).x, BUF_Y, 0.06); d.material = mat('#eef1f4'); d.parent = hudRoot; outline(d, 0.01); d.isPickable = false;
+  }
+  state.buffer.forEach((pin, k) => { const m = makePin(pin); m.parent = hudRoot; m.position = bufPos(k); m.scaling.setAll(HUD_PIN); m.rotationQuaternion = Q.Identity(); pinMesh[pin] = m; });
+  // Pins already in Boxes: their identity no longer matters, draw stand-ins.
+  state.boxes.forEach((b, s) => {
+    const t = makeTray(b.colour); t.position = boxPos(s); slotTray[s] = t;
+    for (let f = 0; f < b.fill; f++) {
+      const m = pinTemplate.clone('inBox'); m.setEnabled(true); m.material = mat(Rules.COLOURS[b.colour].hex); outline(m);
+      m.parent = t; m.position = trayPinLocal(f); m.scaling.setAll(HUD_PIN);
+    }
+  });
+  // index pin meshes on the model
+  scene.meshes.forEach(m => { if (m.metadata && m.metadata.pin != null && m.metadata.onModel) pinMesh[m.metadata.pin] = m; });
+  showBanner('');
+}
+
+// ---- Tween player ---------------------------------------------------------
+const ease = { inOut: t => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2, out: t => 1 - Math.pow(1 - t, 3), in: t => t * t * t,
+  back: t => { const c = 1.6; return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2); } };
+function tween(t0, t1, fns) { tweens.push(Object.assign({ t0, t1, started: false }, fns)); }
+function runTweens(now) {
+  const keep = [];
+  for (const tw of tweens) {
+    if (now < tw.t0) { keep.push(tw); continue; }
+    if (!tw.started) { tw.started = true; tw.start && tw.start(); }
+    const p = tw.t1 > tw.t0 ? Math.min(1, (now - tw.t0) / (tw.t1 - tw.t0)) : 1;
+    tw.update && tw.update(p);
+    if (p >= 1) tw.end && tw.end(); else keep.push(tw);
+  }
+  tweens = keep;
+}
+const bez = (a, c, b, t) => a.scale((1 - t) * (1 - t)).add(c.scale(2 * (1 - t) * t)).add(b.scale(t * t));
+
+function flyTween(t0, t1, m, getTarget, arc, endParent) {
+  let from, ctrl, to, q0, s0;
+  tween(t0, t1, {
+    start() { m.setParent(null); from = m.position.clone(); q0 = m.rotationQuaternion.clone(); s0 = m.scaling.x; to = getTarget();
+      ctrl = V3.Lerp(from, to, 0.5).add(arc); },
+    update(p) { const e = ease.inOut(p); m.position = bez(from, ctrl, to, e); m.rotationQuaternion = Q.Slerp(q0, Q.Identity(), e);
+      m.scaling.setAll(s0 + (HUD_PIN - s0) * e); },
+    end() { const [parent, local] = endParent(); m.setParent(parent); m.position = local; m.rotationQuaternion = Q.Identity(); m.scaling.setAll(HUD_PIN); bump(m); },
+  });
+}
+function bump(m) { const t = performance.now(); tween(t, t + 140, { update: p => m.scaling.setAll(HUD_PIN * (1 + 0.25 * Math.sin(p * Math.PI))) }); }
+
+function play(step) {
+  const T = step.T;
+  if (step.type === 'pinToBox' || step.type === 'pinToBuffer') {
+    const m = pinMesh[step.pin];
+    let p0, dir;
+    tween(step.t0, step.t0 + T.pull, {
+      start() { const pn = m.parent; dir = V3.TransformNormal(m.metadata.normal, pn.getWorldMatrix()).normalize(); m.setParent(null); p0 = m.position.clone(); },
+      update(p) { m.position = p0.add(dir.scale(0.55 * ease.out(p))); },
+    });
+    const toBox = step.type === 'pinToBox';
+    flyTween(step.flyAt, step.t1, m,
+      () => worldOf(hudRoot, toBox ? boxPos(step.slot).add(trayPinLocal(step.fill)) : bufPos(step.index)), // rest position: the Box may still be sliding in
+      new V3(0, 1.0, -1.2),
+      () => toBox ? [slotTray[step.slot], trayPinLocal(step.fill)] : [hudRoot, bufPos(step.index)]);
+  } else if (step.type === 'partFell') {
+    const n = partNode[step.part]; let p0, spin;
+    tween(step.t0, step.t1, {
+      start() { n.setParent(null); p0 = n.position.clone(); spin = (step.part % 2 ? 1 : -1) * 1.2; },
+      update(p) { const e = ease.in(p); n.position = p0.add(new V3(0, -4.5 * e, -0.6 * e)); n.rotation.z = spin * e;
+        n.getChildMeshes().forEach(c => c.visibility = 1 - p * p); },
+      end() { n.setEnabled(false); },
+    });
+  } else if (step.type === 'boxClosed') {
+    let tray, lid, y0;
+    tween(step.t0, step.t1, {
+      start() { tray = slotTray[step.slot];
+        lid = BABYLON.MeshBuilder.CreateBox('lid', { width: hud.trayW * 1.04, height: 0.09, depth: 0.36 }, scene);
+        lid.material = mat(step.colour === null ? '#9aa0a6' : Rules.COLOURS[step.colour].hex); outline(lid); lid.parent = tray; lid.position.set(0, 0.9, -0.05); y0 = tray.position.y; },
+      update(p) {
+        if (p < 0.45) lid.position.y = 0.9 - (0.9 - 0.24) * ease.in(p / 0.45);
+        else { lid.position.y = 0.24; const q = (p - 0.45) / 0.55; tray.position.y = y0 - 1.6 * ease.in(q); tray.getChildMeshes().forEach(c => c.visibility = 1 - q); }
+      },
+      end() { tray.dispose(); },
+    });
+  } else if (step.type === 'boxOpened') {
+    let tray, x1;
+    tween(step.t0, step.t1, {
+      start() { tray = makeTray(step.colour); x1 = boxPos(step.slot).x; tray.position = boxPos(step.slot); tray.position.x = x1 + 3.2; slotTray[step.slot] = tray; },
+      update(p) { tray.position.x = x1 + 3.2 * (1 - ease.back(p)); },
+    });
+  } else if (step.type === 'bufferDrained') {
+    step.pins.forEach((d, k) => {
+      const m = pinMesh[d.pin];
+      flyTween(step.lands[k] - T.drainFly, step.lands[k], m, () => worldOf(hudRoot, boxPos(step.slot).add(trayPinLocal(d.fill))), new V3(0, 0.5, -0.4),
+        () => [slotTray[step.slot], trayPinLocal(d.fill)]);
+    });
+    const from = [];
+    tween(step.landed, step.t1, {
+      start() { step.bufferAfter.forEach((pin, k) => from[k] = pinMesh[pin].position.clone()); },
+      update(p) { step.bufferAfter.forEach((pin, k) => pinMesh[pin].position = V3.Lerp(from[k], bufPos(k), ease.out(p))); },
+    });
+  } else if (step.type === 'won' || step.type === 'lost') {
+    tween(step.t0, step.t0, { start() { showBanner(step.type === 'won' ? 'Level won!' : 'Lost: the Buffer filled'); } });
+  }
+}
+
+// ---- Taps -----------------------------------------------------------------
+function onPinTapped(i, source = 'player') {
+  const now = performance.now();
+  if (state.status !== 'playing') return toast('The level is over: Undo or Restart.');
+  if (Rules.isBlocked(L, state, i)) { stats.blocked++; wiggle(i); toast('Blocked: a Part still covers this Pin.'); renderState(); return; }
+  const busy = now < tracks.all || queue.length > 0;
+  if (opts.input === 'lock' && busy) { stats.ignored++; toast(`Tap ignored: animations still playing (${stats.ignored} so far)`); flashChanged('stIgnored'); renderState(); return; }
+  if (opts.input === 'queue' && busy) {
+    queue.push(i); stats.queuedTotal++; pinMesh[i].metadata.onModel = false;
+    const m = pinMesh[i]; const s = m.scaling.x; tween(now, now + 160, { update: p => m.scaling.setAll(s * (1 + 0.35 * Math.sin(p * Math.PI))) });
+    renderState(); return;
+  }
+  commit(i);
+}
+function commit(i) {
+  const now = performance.now();
+  const r = Rules.tap(L, state, i);
+  if (r.error) return;
+  history.push(state); state = r.state;
+  if (pinMesh[i]) pinMesh[i].metadata.onModel = false;
+  const s = Timeline.schedule(r.events, now, tracks, opts);
+  tracks = s.tracks;
+  s.steps.forEach(play);
+  logTap(i, s.steps, now);
+  renderState();
+}
+function wiggle(i) {
+  const m = pinMesh[i]; if (!m) return; const t = performance.now(); const q0 = m.rotationQuaternion.clone();
+  tween(t, t + 260, { update: p => m.rotationQuaternion = q0.multiply(Q.RotationAxis(new V3(0, 0, 1), 0.35 * Math.sin(p * Math.PI * 4) * (1 - p))) });
+}
+function undo() {
+  runId++;
+  if (!history.length) return toast('Nothing to undo.');
+  // Snap: cancel every running and queued animation, and redraw the previous state at once.
+  state = history.pop(); resetVisuals();
+  logLines.unshift('— Undo: animations cancelled, previous state redrawn at once.'); renderLog(); renderState();
+}
+
+// pointer: drag rotates, short press without movement taps
+let down = null;
+scene.onPointerObservable.add(pi => {
+  const e = pi.event;
+  if (pi.type === BABYLON.PointerEventTypes.POINTERDOWN) down = { x: e.clientX, y: e.clientY, lx: e.clientX, ly: e.clientY, drag: false };
+  else if (pi.type === BABYLON.PointerEventTypes.POINTERMOVE && down) {
+    if (Math.hypot(e.clientX - down.x, e.clientY - down.y) > 8) down.drag = true;
+    if (down.drag) {
+      modelRoot.rotation.y -= (e.clientX - down.lx) * 0.01;
+      modelRoot.rotation.x = Math.max(-0.6, Math.min(1.2, modelRoot.rotation.x + (e.clientY - down.ly) * 0.006));
+      down.lx = e.clientX; down.ly = e.clientY;
+    }
+  } else if (pi.type === BABYLON.PointerEventTypes.POINTERUP && down) {
+    if (!down.drag) {
+      const hit = scene.pick(scene.pointerX, scene.pointerY, m => m.isEnabled() && m.metadata && m.metadata.pin != null && m.metadata.onModel);
+      if (hit && hit.hit) onPinTapped(hit.pickedMesh.metadata.pin);
+    }
+    down = null;
+  }
+});
+
+// ---- Automation (walkthroughs) ---------------------------------------------
+const idle = () => performance.now() >= tracks.all && queue.length === 0;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+async function waitIdle(id) { while (!idle()) { await sleep(30); if (id !== runId) throw 'cancelled'; } }
+function pathFromHere() {
+  if (state === initState && interestingPath) return interestingPath.slice();
+  return Rules.solve(L, state);
+}
+async function rapidFire() {
+  const id = ++runId;
+  if (queue.length) await waitIdle(id).catch(() => {});
+  const path = pathFromHere();
+  if (!path) return toast('No winning order from here. Undo or Restart.');
+  const gap = +$('rapidGap').value || 160;
+  for (const i of path) {
+    if (id !== runId || state.status !== 'playing') return;
+    if (pinMesh[i] && pinMesh[i].metadata.onModel) onPinTapped(i, 'auto');
+    await sleep(gap);
+  }
+}
+function nextWinningTap() {
+  const p = queue.length ? null : pathFromHere();
+  if (!p || !p.length) return toast(queue.length ? 'Wait for the queue to empty.' : 'No winning order from here.');
+  onPinTapped(p[0], 'auto');
+}
+// Play the interesting path slowly up to (and including) the n-th tap that drains the Buffer.
+async function playToDrain(nth, includeIt = true) {
+  const id = ++runId;
+  restart(); runId = id;
+  let st = initState, k = 0, count = 0;
+  for (; k < interestingPath.length; k++) { const r = Rules.tap(L, st, interestingPath[k]); st = r.state; if (r.events.some(e => e.type === 'bufferDrained') && ++count === nth) break; }
+  const upto = includeIt ? k : k - 1;
+  try {
+    for (let j = 0; j <= upto; j++) { await waitIdle(id); await sleep(j < upto ? 120 : 400); if (id !== runId) return; commit(interestingPath[j]); }
+  } catch (e) { return; }
+  return id;
+}
+async function undoMidChain() {
+  const id = await playToDrain(1, false); if (!id) return;
+  try { await waitIdle(id); } catch (e) { return; }
+  await sleep(500); if (id !== runId) return;
+  const k = history.length; commit(interestingPath[k]);
+  toast('Tapped into a drain chain… undo in 300 ms');
+  await sleep(300); if (id !== runId) return;
+  undo();
+}
+async function playToLoss() {
+  const id = ++runId; restart(); runId = id;
+  const gap = +$('rapidGap').value || 160;
+  while (state.status === 'playing' && id === runId) {
+    const open = new Set(state.boxes.map(b => b.colour));
+    const legal = Rules.legalTaps(L, state).filter(i => pinMesh[i] && pinMesh[i].metadata.onModel && !queue.includes(i));
+    const bad = legal.filter(i => !open.has(L.pins[i].colour));
+    const pick = (bad.length ? bad : legal)[0];
+    if (pick == null) break;
+    onPinTapped(pick, 'auto');
+    await sleep(opts.input === 'ahead' ? gap : Math.max(gap, 30));
+    if (opts.input !== 'ahead') { try { await waitIdle(id); } catch (e) { return; } }
+  }
+}
+
+// ---- Panel ------------------------------------------------------------------
+const SCENARIOS = [
+  { title: 'A full chain', text: 'Plays a winning order slowly, stopping after the first tap whose chain closes a Box and drains the Buffer into the next one. Compare the same chain played one step at a time and overlapped. Watch: does the Part fall while the Pin flies? Does the next Box wait for the old one to leave? Do drained Pins leave in a ripple or all at once?',
+    steps: [['Play it: one after another', () => { setMode('sequencing', 'strict'); playToDrain(1); }],
+            ['Play it: overlapped', () => { setMode('sequencing', 'overlap'); playToDrain(1); }],
+            ['Same, at quarter speed', () => { setSpeed(0.25); playToDrain(1); }],
+            ['Back to normal speed', () => setSpeed(1)]] },
+  { title: 'Tapping fast', text: 'Fires the whole winning order at the rapid-fire gap (160 ms by default, a quick player). Ignored: taps made while anything moves are dropped, so the order falls apart. Queued: every tap is kept, and the queue empties one chain at a time; but a Pin freed by a tap still waiting in the queue is still Blocked, so tapping it does nothing (watch "Blocked taps"). Played at once: the rules apply every tap immediately and each animation waits only for the Box or Buffer slot it needs.',
+    steps: [['Rapid-fire: ignored', () => { setMode('input', 'lock'); restart(); rapidFire(); }],
+            ['Rapid-fire: queued', () => { setMode('input', 'queue'); restart(); rapidFire(); }],
+            ['Rapid-fire: played at once', () => { setMode('input', 'ahead'); restart(); rapidFire(); }],
+            ['Played at once, one after another', () => { setMode('input', 'ahead'); setMode('sequencing', 'strict'); restart(); rapidFire(); }]] },
+  { title: 'Undo mid-chain', text: 'Plays up to the tap just before the first Buffer drain, makes that tap, then presses Undo 300 ms later while the chain is still playing. Undo here snaps: every animation stops and the previous state is redrawn at once. Ask yourself whether that is fine for a debug-only Undo.',
+    steps: [['Run it', () => undoMidChain()]] },
+  { title: 'Losing', text: 'Taps Pins whose colour has no open Box until the Buffer fills. The level is lost the moment the last slot fills, but the "Lost" banner waits until the flying Pin lands. Try it in each tap mode.',
+    steps: [['Tap toward a loss', () => playToLoss()]] },
+];
+let tab = 0;
+function renderTabs() {
+  $('tabs').innerHTML = '';
+  SCENARIOS.forEach((s, i) => { const b = document.createElement('button'); b.textContent = s.title; b.className = i === tab ? 'on' : ''; b.onclick = () => { tab = i; renderTabs(); }; $('tabs').append(b); });
+  const s = SCENARIOS[tab]; const box = $('scenario'); box.innerHTML = `<p>${s.text}</p>`;
+  const row = document.createElement('div'); row.className = 'row';
+  s.steps.forEach(([label, fn], k) => { const b = document.createElement('button'); b.textContent = `${k + 1}. ${label}`; if (k === 0) b.className = 'primary'; b.onclick = fn; row.append(b); });
+  box.append(row);
+}
+const HELP = {
+  strict: 'Each step waits for the one before it, even across taps: Pin flies and lands, then the Part falls, then the Box closes, the next slides in, then the Buffer drains.',
+  overlap: 'Each step waits only for what it touches. The Pin pulls out at once, its Part falls as it leaves, and a Pin heading for a closing Box hovers until the next Box has arrived.',
+  lock: 'Taps made while anything is still moving are ignored.',
+  queue: 'Taps made while anything is moving wait in line (the Pin pulses) and are played one chain at a time.',
+  ahead: 'Every tap goes to the rules at once. Only the animations queue up, each waiting for its own Box or Buffer slot.',
+};
+function setMode(k, v) {
+  opts[k] = v;
+  document.querySelectorAll(k === 'sequencing' ? '#segSeq button' : '#segInput button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
+  $(k === 'sequencing' ? 'seqHelp' : 'inputHelp').textContent = HELP[v];
+}
+function setSpeed(v) { opts.speed = v; $('speed').value = v; $('speedOut').textContent = (+v).toFixed(2).replace(/0$/, '') + '×'; }
+document.querySelectorAll('#segSeq button').forEach(b => b.onclick = () => setMode('sequencing', b.dataset.v));
+document.querySelectorAll('#segInput button').forEach(b => b.onclick = () => setMode('input', b.dataset.v));
+$('speed').oninput = e => setSpeed(+e.target.value);
+for (const k in Timeline.DEFAULTS) {
+  const l = document.createElement('label'); l.textContent = Timeline.LABELS[k] + ' (ms)';
+  const inp = document.createElement('input'); inp.type = 'number'; inp.value = Timeline.DEFAULTS[k]; inp.step = 10;
+  inp.oninput = () => opts.timing[k] = +inp.value;
+  $('timing').append(l, inp);
+}
+
+const cname = c => c === null ? 'grey' : Rules.COLOURS[c].name;
+const chip = c => c === null ? '<span class="chip empty">·</span>' : `<span class="chip" style="background:${Rules.COLOURS[c].hex}">${Rules.COLOURS[c].name[0]}</span>`;
+function renderState() {
+  const left = state.removed.filter(x => !x).length;
+  const statusText = { playing: 'Playing', won: 'Won', lost: 'Lost', stuck: 'Rule bug: stuck' }[state.status];
+  const buf = []; for (let k = 0; k < L.bufferSize; k++) buf.push(chip(k < state.buffer.length ? L.pins[state.buffer[k]].colour : null));
+  $('state').innerHTML = `
+    <div><b>Rules say:</b> ${statusText}. ${left} Pins left on the car. Taps made: ${history.length}.</div>
+    <div><b>Boxes:</b> ${state.boxes.map(b => b.colour === null ? 'grey (no colour left)' : `${chip(b.colour)} ${b.fill}/${L.capacity}`).join(' &nbsp; ')}</div>
+    <div><b>Buffer:</b> ${buf.join('')} (${state.buffer.length}/${L.bufferSize})</div>
+    <div><b>Animations:</b> <span id="stBusy"></span></div>
+    <div id="stIgnored"><b>Taps waiting in the queue:</b> ${queue.length} &nbsp; <b>Ignored so far:</b> ${stats.ignored} &nbsp; <b>Blocked taps:</b> ${stats.blocked}</div>`;
+  renderBusy();
+}
+function renderBusy() {
+  const el = $('stBusy'); if (!el) return;
+  const ms = Math.max(0, tracks.all - performance.now());
+  el.textContent = ms > 0 ? `still playing for ${Math.round(ms)} ms (the screen is behind the rules)` : 'settled (the screen matches the rules)';
+}
+function flashChanged(id) { const e = $(id); if (e) { e.classList.add('changed'); setTimeout(() => e.classList.remove('changed'), 400); } }
+let logLines = [];
+function logTap(i, steps, now) {
+  const r = t => '+' + Math.round(t - now);
+  const pin = `${cname(L.pins[i].colour)} Pin`;
+  const lines = [`Tap: ${pin} on ${CAR.parts[L.pins[i].part].id}`];
+  for (const s of steps) {
+    if (s.type === 'pinToBox') lines.push(`  ${r(s.t0)} pull out, ${r(s.flyAt)} fly, ${r(s.t1)} lands in Box ${s.slot + 1}`);
+    else if (s.type === 'pinToBuffer') lines.push(`  ${r(s.t0)} pull out, ${r(s.flyAt)} fly, ${r(s.t1)} lands in Buffer slot ${s.index + 1}`);
+    else if (s.type === 'partFell') lines.push(`  ${r(s.t0)}–${r(s.t1)} ${CAR.parts[s.part].id} falls away`);
+    else if (s.type === 'boxClosed') lines.push(`  ${r(s.t0)}–${r(s.t1)} ${cname(s.colour)} Box ${s.slot + 1} closes`);
+    else if (s.type === 'boxOpened') lines.push(`  ${r(s.t0)}–${r(s.t1)} ${cname(s.colour)} Box slides into slot ${s.slot + 1}`);
+    else if (s.type === 'bufferDrained') lines.push(`  ${r(s.t0)}–${r(s.landed)} ${s.pins.length} Buffer Pin(s) drain into Box ${s.slot + 1}; Buffer closes gaps until ${r(s.t1)}`);
+    else lines.push(`  ${r(s.t0)} ${s.type === 'won' ? 'Level won' : 'Level lost'} shown`);
+  }
+  logLines.unshift(lines.join('\n')); logLines = logLines.slice(0, 40); renderLog();
+}
+function renderLog() { $('log').textContent = logLines.join('\n') || 'Tap a Pin to see its schedule.'; }
+let toastTimer;
+function toast(t) { const e = $('toast'); e.textContent = t; e.style.opacity = 1; clearTimeout(toastTimer); toastTimer = setTimeout(() => e.style.opacity = 0, 1300); }
+function showBanner(t) { const e = $('banner'); e.textContent = t; e.style.opacity = t ? 1 : 0; }
+
+$('bUndo').onclick = undo;
+$('bRestart').onclick = restart;
+$('bHint').onclick = () => { runId++; nextWinningTap(); };
+$('bRapid').onclick = () => rapidFire();
+$('bDeal').onclick = newLevel;
+$('panelToggle').onclick = () => { $('panel').classList.add('open'); $('panelClose').style.display = 'inline-block'; };
+$('panelClose').onclick = () => { $('panel').classList.remove('open'); $('panelClose').style.display = 'none'; };
+
+// ---- Go ---------------------------------------------------------------------
+setMode('sequencing', 'overlap'); setMode('input', 'ahead'); setSpeed(1); renderTabs();
+newLevel();
+let lastBusy = 0;
+engine.runRenderLoop(() => {
+  const now = performance.now();
+  if (opts.input === 'queue' && queue.length && now >= tracks.all) { commit(queue.shift()); }
+  runTweens(now);
+  if (now - lastBusy > 100) { lastBusy = now; renderBusy(); }
+  scene.render();
+});
+window.addEventListener('resize', () => { engine.resize(); });
+window.__proto = { get state() { return state; }, get tracks() { return tracks; }, get L() { return L; }, onPinTapped, undo, rapidFire, playToDrain };
+</script>
+</body>
+</html>
