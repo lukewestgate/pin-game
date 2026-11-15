@@ -18,7 +18,7 @@ import { CreatePlane } from '@babylonjs/core/Meshes/Builders/planeBuilder.pure';
 import { Mesh } from '@babylonjs/core/Meshes/mesh.pure';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode.pure';
 import { Scene } from '@babylonjs/core/scene.pure';
-import { buildModel, materialCache } from './model-scene';
+import { PIN, buildModel, materialCache } from './model-scene';
 import {
   fitDistance,
   layout as computeLayout,
@@ -30,7 +30,6 @@ import {
 const HUD_LAYER = 0x10000000;
 const START_YAW = 0.6;
 const START_PITCH = -0.35;
-const PIN = { diameter: 0.24, height: 0.08 };
 const GREY_BOX = '#6b7780';
 const BUFFER_MAT = '#1b272d';
 const BUFFER_SLOT = '#0f1a1f';
@@ -81,7 +80,11 @@ export function createGameView(
   const pinMeshes = level.pinSockets.map((socket, i) => {
     const pin = level.pins[i];
     if (!pin) throw new Error(`Pin ${i} has no rules entry`);
-    const mesh = CreateCylinder(`pin-${socket.id}`, { ...PIN, tessellation: 16 }, scene);
+    const mesh = CreateCylinder(
+      `pin-${socket.id}`,
+      { diameter: PIN.diameter, height: PIN.height, tessellation: PIN.segments },
+      scene,
+    );
     const dir = Vector3.FromArray(socket.direction).normalize();
     mesh.parent = model.parts[pin.part] ?? null;
     mesh.position = Vector3.FromArray(socket.position).add(dir.scale(PIN.height / 2));

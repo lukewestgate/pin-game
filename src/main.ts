@@ -22,9 +22,10 @@ const statusText = element('status');
 const undoButton = element<HTMLButtonElement>('undo');
 const restartButton = element<HTMLButtonElement>('restart');
 
-const firstLevel = bundledLevels()[0];
-if (!firstLevel) throw new Error('No Level is bundled');
-const level = firstLevel;
+// The game boots straight into the wooden-toy car. (tiny-cart-1 stays bundled as a test fixture.)
+const carLevel = bundledLevels().find((l) => l.id === 'wooden-car-1');
+if (!carLevel) throw new Error('The wooden-car-1 Level is not bundled');
+const level = carLevel;
 
 // WebGL2 engine (Babylon falls back to WebGL1 only where WebGL2 is missing).
 const engine = new Engine(

@@ -79,6 +79,37 @@ describe('game view', () => {
     expect(view.pinAt(at.x, at.y)).not.toBe(lidA);
   });
 
+  it('fits the whole wooden car, Pins included, in the Model region at the start view', () => {
+    const level = bundledLevels().find((l) => l.id === 'wooden-car-1');
+    if (!level) throw new Error('missing wooden-car-1');
+    const engine = new NullEngine({
+      renderWidth: W,
+      renderHeight: H,
+      textureSize: 512,
+      deterministicLockstep: false,
+      lockstepMaxSteps: 1,
+    });
+    const view = createGameView(engine, level, () => INSETS);
+    current = { view, engine };
+    view.draw(initialState(level).state);
+    view.scene.render();
+    const camera = view.scene.getCameraByName('model-camera') as ArcRotateCamera;
+    expect([camera.alpha, camera.beta]).toEqual([0.6, Math.PI / 2 - 0.35]);
+    const toNdc = camera.getViewMatrix().multiply(camera.getProjectionMatrix());
+    for (const mesh of view.scene.meshes) {
+      if (mesh.layerMask === 0x10000000) continue;
+      mesh.computeWorldMatrix(true);
+      for (const corner of mesh.getBoundingInfo().boundingBox.vectorsWorld) {
+        const ndc = Vector3.TransformCoordinates(corner, toNdc);
+        expect(Math.abs(ndc.x)).toBeLessThanOrEqual(1);
+        expect(Math.abs(ndc.y)).toBeLessThanOrEqual(1);
+      }
+    }
+    const roof = level.pinSockets.findIndex((s) => s.id === 'roof-1');
+    const at = screenPoint(view, 'roof-1');
+    expect(view.pinAt(at.x, at.y)).toBe(roof);
+  });
+
   it('places HUD meshes from the layout rects, with the origin at the top left', () => {
     const { level, engine, view } = setup();
     current = { view, engine };
