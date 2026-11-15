@@ -7,7 +7,7 @@ A puzzle game where the player takes apart a 3D Model by removing its coloured P
 ### Sorting
 
 **Pin**:
-A coloured peg on the Model that the player removes by clicking it.
+A coloured peg sitting in a Socket on the Model, which the player removes by clicking it. Each Pin holds exactly one Part.
 _Avoid_: Peg, screw, bolt
 
 **Box**:
@@ -18,15 +18,35 @@ _Avoid_: Colour group, slot, bin
 The number of Pins a Box holds before it closes (default 3).
 
 **Buffer**:
-The row of overflow slots (default 7) that holds removed Pins with no matching open Box. When a matching Box appears, the Pins drain into it. A Pin arriving when the Buffer is full loses the level.
+The row of overflow slots (default 5) that holds removed Pins with no matching open Box. When a matching Box appears, the Pins drain into it. The level is lost the moment a Pin fills the last slot.
 _Avoid_: Temp buffer, holding area, tray
 
 ### Level
 
+**Level**:
+One Model plus a colour for every Socket, a seed, and any overrides of the rule numbers. The same Model can appear in many Levels.
+_Avoid_: Stage, puzzle
+
 **Model**:
-The whole object that a level takes apart, built from Parts.
+The whole object that a Level takes apart, built from Parts. It has no Pin colours of its own.
 _Avoid_: Object, level object
 
 **Part**:
 One piece of a Model, such as a wheel, axle, panel or seat. It falls away once all the Pins holding it are removed, which can reveal the Parts and Pins behind it.
 _Avoid_: Layer, panel (as a general term), piece
+
+**Socket**:
+A place on a Part where a Pin sits, with a position and a direction the Pin pulls out along. A Level gives each Socket a colour, which makes it a Pin.
+_Avoid_: Pin slot, hole, mount
+
+**Core**:
+A Part with no Sockets. It never falls away, so it must not cover any Socket.
+_Avoid_: Base, chassis (as a general term)
+
+**Blocked**:
+A Pin is Blocked while any Part covering it has not yet fallen away. A Blocked Pin cannot be removed.
+_Avoid_: Locked, hidden, covered (as a state name)
+
+**Peek**:
+Pressing and holding on a Part to see it transparently, showing the Pins beneath so the player can plan ahead.
+_Avoid_: X-ray, preview
