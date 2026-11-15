@@ -195,7 +195,7 @@ const BOX_TINT = c => BABYLON.Color3.Lerp(BABYLON.Color3.FromHexString(c), BABYL
 const K = {
   margin: 10,       // outer margin inside the safe area
   boxGap: 10, boxPad: 6, boxSlotMax: 46,
-  bufGap: 5, bufPad: 6, bufSlotMax: 52,
+  bufGap: 5, bufPad: 6, bufSlotMax: 52, bufToBox: 0.8,
   pinInSlot: 0.78,  // Pin head diameter / slot size
   rowGap: 8,
 };
@@ -332,13 +332,24 @@ function clearHud() { hudRoot.getChildMeshes().forEach(m => m.dispose()); }
 
 // ===================================================================
 // Layout: a pure function from screen size + safe insets + level numbers to rectangles (CSS px).
-function sizeBoxRow(avail, n, cap) {
-  const boxW = Math.min((avail - K.boxGap * (n - 1)) / n, cap * K.boxSlotMax + 2 * K.boxPad);
-  const slot = (boxW - 2 * K.boxPad) / cap;
-  return { boxW, slot, boxH: slot + 2 * K.boxPad, rowW: n * boxW + (n - 1) * K.boxGap };
+// Box slots sit in two rows: ceil(cap/2) on top, the rest centred below (Capacity 3 → 2 + 1),
+// so a Box is roughly square.
+function boxSlotGrid(cap) { const cols = Math.ceil(cap / 2); return { cols, rows: cap > 1 ? 2 : 1 }; }
+function boxSlotCentre(s, cap, x, y, slot) {
+  const { cols } = boxSlotGrid(cap);
+  const row = s < cols ? 0 : 1, inRow = row === 0 ? cols : cap - cols, i = row === 0 ? s : s - cols;
+  const rowX = x + K.boxPad + (cols - inRow) * slot / 2;
+  return { cx: rowX + slot * (i + 0.5), cy: y + K.boxPad + slot * (row + 0.5) };
 }
-function sizeBuffer(avail, b) {
-  const slot = Math.min(K.bufSlotMax, (avail - 2 * K.bufPad - K.bufGap * (b - 1)) / b);
+function sizeBoxRow(avail, n, cap) {
+  const { cols, rows } = boxSlotGrid(cap);
+  const boxW = Math.min((avail - K.boxGap * (n - 1)) / n, cols * K.boxSlotMax + 2 * K.boxPad);
+  const slot = (boxW - 2 * K.boxPad) / cols;
+  return { boxW, slot, boxH: rows * slot + 2 * K.boxPad, rowW: n * boxW + (n - 1) * K.boxGap };
+}
+// Buffer Pins are drawn smaller than Box Pins: Buffer slot ≤ bufToBox × Box slot.
+function sizeBuffer(avail, b, boxSlot) {
+  const slot = Math.min(K.bufSlotMax, boxSlot * K.bufToBox, (avail - 2 * K.bufPad - K.bufGap * (b - 1)) / b);
   return { slot, trayW: b * slot + (b - 1) * K.bufGap + 2 * K.bufPad, trayH: slot + 2 * K.bufPad };
 }
 function layout(W, H, ins, v, wide, lv) {
@@ -348,7 +359,7 @@ function layout(W, H, ins, v, wide, lv) {
   const land = W > H;
   let col = { ...safe };
   const boxesIn = (x, w) => sizeBoxRow(w - 2 * M, lv.boxes, lv.cap);
-  const bufIn = (x, w) => sizeBuffer(w - 2 * M, lv.buf);
+  const bufIn = (x, w) => sizeBuffer(w - 2 * M, lv.buf, boxesIn(x, w).slot);
   const centre = (x, w, inner) => x + (w - inner) / 2;
 
   if (land && wide === 'spread') {
@@ -484,7 +495,7 @@ function buildHud() {
     const x = boxes.x + i * (boxes.boxW + K.boxGap);
     hudBox(x, boxes.y, boxes.boxW, boxes.boxH, 30, BOX_TINT(col), 0, 0.45);
     for (let s = 0; s < S.cap; s++) {
-      const cx = x + K.boxPad + boxes.slot * (s + 0.5), cy = boxes.y + boxes.boxH / 2;
+      const { cx, cy } = boxSlotCentre(s, S.cap, x, boxes.y, boxes.slot);
       hudDisc(cx, cy, boxes.slot * 0.82, BABYLON.Color3.FromHexString(col).scale(0.75).toHexString());
       if (s < fill.boxes[i]) hudPin(cx, cy, boxes.slot * K.pinInSlot, col);
     }
