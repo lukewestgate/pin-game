@@ -1,12 +1,14 @@
 // The Babylon scene for one Level: the Model, its Pins, and the Box row and Buffer drawn by an
 // orthographic HUD camera in CSS px. It draws rules state and reports which Pin was clicked;
-// it never decides outcomes. Snaps with no animation until the Timeline (ticket 25).
+// it never decides outcomes. `draw` snaps to a state from scratch; `play` animates one tap's rules
+// events through the pure Timeline, with overlapping steps (ticket 25).
 import type { LoadedLevel } from '../content/loader';
 import { CANDY } from '../content/palette';
 import { CAMERA, FEEDBACK } from '../input/constants';
 import { turn as turnView } from '../input/camera-control';
 import type { PinCandidate } from '../input/picking';
 import { blockersOf, hasFallen, isBlocked, type State } from '../rules/state';
+import type { RulesEvent } from '../rules/rules';
 import { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera.pure';
 import { Camera } from '@babylonjs/core/Cameras/camera.pure';
 import { FreeCamera } from '@babylonjs/core/Cameras/freeCamera.pure';
@@ -24,6 +26,7 @@ import { TransformNode } from '@babylonjs/core/Meshes/transformNode.pure';
 import { Scene } from '@babylonjs/core/scene.pure';
 import { PIN, buildModel, materialCache } from './model-scene';
 import { flashStrength, perpendicular, wiggleOffset } from './pin-feedback';
+import { emptyTracks, schedule, type Step, type Timing, type Tracks } from './timeline';
 import {
   fitDistance,
   layout as computeLayout,
@@ -39,12 +42,40 @@ const GREY_BOX = '#6b7780';
 const BUFFER_MAT = '#1b272d';
 const BUFFER_SLOT = '#0f1a1f';
 
+export interface ViewOptions {
+  /** Milliseconds; defaults to `performance.now`. Tests drive it by hand. */
+  clock?: () => number;
+  /** The one animation speed multiplier. */
+  speed?: number;
+  timing?: Partial<Timing>;
+}
+
+const PULL_DISTANCE = 0.5;
+const FALL_DISTANCE = 7;
+const HUD_EXIT_MARGIN = 10;
+
+/** A timed piece of rendering. `start` runs once at `t0`, `tick` each frame, `end` at `t1`. */
+interface Task {
+  t0: number;
+  t1: number;
+  started?: boolean;
+  start?: () => void;
+  tick?: (p: number) => void;
+  end?: () => void;
+}
+
+const ease = (p: number): number => p * p * (3 - 2 * p);
+
 export interface GameView {
   readonly scene: Scene;
   /** The current layout in CSS px. */
   readonly layout: HudLayout;
-  /** Draws `state` from scratch. */
+  /** Cancels every animation, resets the tracks and draws `state` from scratch (Undo, Restart). */
   draw(state: State): void;
+  /** Animates one tap's rules events now. The rules state has already moved on. */
+  play(events: readonly RulesEvent[]): void;
+  /** Called when a won or lost step is reached, after everything has settled. */
+  onOutcome: ((outcome: 'won' | 'lost') => void) | null;
   /** The Pin under a point in CSS px relative to the canvas, if any. */
   pinAt(x: number, y: number): number | null;
   /** Zoom, 1 to 2.2. Never changes the turning centre (no panning). */
@@ -59,7 +90,7 @@ export interface GameView {
   /** Blocked tap feedback at time `now` (ms): shake the Pin, flash its covering Parts red. */
   blockedTap(pin: number, state: State, now: number): void;
   /** Advances the feedback animations to `now` (ms). Runs before every render. */
-  update(now: number): void;
+  updateFeedback(now: number): void;
   /** Call after the canvas changes size. */
   resize(): void;
   dispose(): void;
@@ -73,7 +104,9 @@ export function createGameView(
   engine: AbstractEngine,
   level: LoadedLevel,
   getInsets: () => Insets = () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
+  options: ViewOptions = {},
 ): GameView {
+  const clock = options.clock ?? (() => performance.now());
   const scene = new Scene(engine);
   scene.clearColor = new Color4(0, 0, 0, 0);
   const material = materialCache(scene);
@@ -161,40 +194,316 @@ export function createGameView(
     return mesh;
   }
 
-  function hudPin(name: string, r: Rect, hex: string, size: number): void {
-    const mesh = CreateCylinder(name, { diameter: r.w * size, height: 1, tessellation: 24 }, scene);
+  /** A Pin head as a flat disc at a point in CSS px. */
+  function hudDisc(name: string, x: number, y: number, diameter: number, hex: string): Mesh {
+    const mesh = CreateCylinder(name, { diameter, height: 1, tessellation: 24 }, scene);
     mesh.parent = hudRoot;
     mesh.layerMask = HUD_LAYER;
     mesh.isPickable = false;
     mesh.rotation.x = -Math.PI / 2;
-    mesh.position = new Vector3(r.x + r.w / 2, -(r.y + r.h / 2), -3);
+    mesh.position = new Vector3(x, -y, -3);
     mesh.material = flat(hex);
+    return mesh;
+  }
+
+  const centre = (r: Rect): { x: number; y: number } => ({ x: r.x + r.w / 2, y: r.y + r.h / 2 });
+
+  function hudPin(name: string, r: Rect, hex: string): Mesh {
+    const c = centre(r);
+    return hudDisc(name, c.x, c.y, r.w * layout.pinHead, hex);
+  }
+
+  const tintOf = (colour: number | null): string =>
+    colour === null ? GREY_BOX : (CANDY[colour] ?? GREY_BOX);
+
+  // What the HUD currently shows, kept so steps can move individual pieces.
+  let boxNodes: (TransformNode | undefined)[] = [];
+  let bufferPins: (Mesh | undefined)[] = [];
+  let flyCount = 0;
+
+  function holeRect(b: number, i: number): Rect {
+    const rect = layout.boxHoles[b]?.[i];
+    if (!rect) throw new Error(`Box ${b} has no hole ${i}`);
+    return rect;
+  }
+
+  function slotRect(i: number): Rect {
+    const rect = layout.bufferSlots[i];
+    if (!rect) throw new Error(`The Buffer has no slot ${i}`);
+    return rect;
+  }
+
+  function addBoxPin(b: number, i: number, colour: number | null): Mesh {
+    const mesh = hudPin(`box-${b}-pin-${i}`, holeRect(b, i), tintOf(colour));
+    mesh.parent = boxNodes[b] ?? hudRoot;
+    return mesh;
+  }
+
+  /** One Box, its holes and its Pins, as a node whose offset slides it. */
+  function buildBox(b: number, colour: number | null, fill: number): TransformNode | undefined {
+    const rect = layout.boxes[b];
+    if (!rect) return undefined;
+    const node = new TransformNode(`box-${b}-node`, scene);
+    node.parent = hudRoot;
+    boxNodes[b] = node;
+    const tint = tintOf(colour);
+    hudPlane(`box-${b}`, rect, 0, scaled(tint, 0.92)).parent = node;
+    layout.boxHoles[b]?.forEach((hole, i) => {
+      hudPlane(`box-${b}-hole-${i}`, hole, -1, scaled(tint, 0.42), 0.9).parent = node;
+      if (i < fill) addBoxPin(b, i, colour);
+    });
+    return node;
   }
 
   function drawHud(state: State): void {
-    for (const child of hudRoot.getChildMeshes()) child.dispose();
-    state.boxes.forEach((box, b) => {
-      const rect = layout.boxes[b];
-      if (!rect) return;
-      const tint = box.colour === null ? GREY_BOX : (CANDY[box.colour] ?? GREY_BOX);
-      hudPlane(`box-${b}`, rect, 0, scaled(tint, 0.92));
-      layout.boxHoles[b]?.forEach((hole, i) => {
-        hudPlane(`box-${b}-hole-${i}`, hole, -1, scaled(tint, 0.42), 0.9);
-        if (i < box.fill) hudPin(`box-${b}-pin-${i}`, hole, tint, layout.pinHead);
-      });
-    });
+    for (const child of hudRoot.getChildren()) child.dispose();
+    boxNodes = [];
+    bufferPins = [];
+    state.boxes.forEach((box, b) => buildBox(b, box.colour, box.fill));
     hudPlane('buffer', layout.buffer, 0, BUFFER_MAT);
     layout.bufferSlots.forEach((slot, i) => {
       hudPlane(`buffer-slot-${i}`, slot, -1, BUFFER_SLOT, 0.9);
       const colour = state.buffer[i];
       if (colour !== undefined)
-        hudPin(`buffer-pin-${i}`, slot, CANDY[colour] ?? '#ffffff', layout.pinHead);
+        bufferPins[i] = hudPin(`buffer-pin-${i}`, slot, CANDY[colour] ?? '#ffffff');
     });
   }
 
+  // ---- Animation: plays the Timeline's steps and never decides outcomes ----
+  const pinHomes = pinMeshes.map((mesh) => ({
+    parent: mesh.parent,
+    position: mesh.position.clone(),
+    rotation: (mesh.rotationQuaternion ?? new Quaternion()).clone(),
+  }));
+  const partHomes = model.parts.map((node) => node.position.clone());
+  let tasks: Task[] = [];
+  let tracks: Tracks = emptyTracks();
+  let outcomeHandler: GameView['onOutcome'] = null;
+
+  /** A world point as CSS px, through the Model camera and its viewport. */
+  function toScreen(world: Vector3): { x: number; y: number } {
+    const ndc = Vector3.TransformCoordinates(
+      world,
+      camera.getViewMatrix().multiply(camera.getProjectionMatrix()),
+    );
+    const m = layout.model;
+    return { x: m.x + ((ndc.x + 1) / 2) * m.w, y: m.y + ((1 - ndc.y) / 2) * m.h };
+  }
+
+  const lerp = (a: number, b: number, p: number): number => a + (b - a) * p;
+
+  /** Where a Part flies when it falls: its override, else outward from the Model's centre. */
+  function fallDirection(part: number): Vector3 {
+    const override = level.model.parts[part]?.fall;
+    if (override) return Vector3.FromArray(override).normalize();
+    const node = model.parts[part];
+    if (!node) return Vector3.Up();
+    const { min, max } = node.getHierarchyBoundingVectors(true);
+    const out = min.add(max).scale(0.5).subtract(model.bounds.centre);
+    return out.lengthSquared() < 1e-6 ? Vector3.Up() : out.normalize();
+  }
+
+  function tasksFor(step: Step): Task[] {
+    switch (step.kind) {
+      case 'pinToBox':
+      case 'pinToBuffer': {
+        const mesh = pinMeshes[step.pin];
+        if (!mesh) return [];
+        const colour = level.pins[step.pin]?.colour ?? 0;
+        const hex = CANDY[colour] ?? '#ffffff';
+        let from = Vector3.Zero();
+        let dir = Vector3.Up();
+        let disc: Mesh | undefined;
+        let origin = { x: 0, y: 0 };
+        const target = (): Rect =>
+          step.kind === 'pinToBox' ? holeRect(step.box, step.fill - 1) : slotRect(step.slot);
+        return [
+          {
+            t0: step.t0,
+            t1: step.pullEnd,
+            start: () => {
+              // Leave the Part (which may fall) but keep the world pose.
+              mesh.setParent(null);
+              mesh.isPickable = false;
+              from = mesh.position.clone();
+              dir = mesh.getDirection(Vector3.Up()).normalize();
+            },
+            tick: (p) => mesh.position.copyFrom(from.add(dir.scale(PULL_DISTANCE * ease(p)))),
+          },
+          {
+            t0: step.flyAt,
+            t1: step.t1,
+            start: () => {
+              mesh.setEnabled(false);
+              origin = toScreen(mesh.position);
+              disc = hudDisc(`fly-${flyCount++}`, origin.x, origin.y, 1, hex);
+            },
+            tick: (p) => {
+              if (!disc) return;
+              const to = target();
+              const c = centre(to);
+              const e = ease(p);
+              disc.position.x = lerp(origin.x, c.x, e);
+              disc.position.y = -lerp(origin.y, c.y, e);
+              disc.scaling.setAll(to.w * layout.pinHead * lerp(1.4, 1, e));
+            },
+            end: () => {
+              disc?.dispose();
+              if (step.kind === 'pinToBox') addBoxPin(step.box, step.fill - 1, colour);
+              else
+                bufferPins[step.slot] = hudPin(`buffer-pin-${step.slot}`, slotRect(step.slot), hex);
+            },
+          },
+        ];
+      }
+      case 'partFell': {
+        const node = model.parts[step.part];
+        const home = partHomes[step.part];
+        if (!node || !home) return [];
+        let dir = Vector3.Up();
+        return [
+          {
+            t0: step.t0,
+            t1: step.t1,
+            start: () => {
+              dir = fallDirection(step.part);
+              for (const m of node.getChildMeshes()) m.isPickable = false;
+            },
+            tick: (p) => node.position.copyFrom(home.add(dir.scale(FALL_DISTANCE * p * p))),
+            end: () => node.setEnabled(false),
+          },
+        ];
+      }
+      case 'boxClosed': {
+        const rect = layout.boxes[step.box];
+        const away = rect ? rect.y + rect.h + HUD_EXIT_MARGIN : 100;
+        return [
+          {
+            t0: step.t0,
+            t1: step.t1,
+            tick: (p) => {
+              const node = boxNodes[step.box];
+              if (node) node.position.y = away * ease(p);
+            },
+            end: () => {
+              boxNodes[step.box]?.dispose();
+              boxNodes[step.box] = undefined;
+            },
+          },
+        ];
+      }
+      case 'boxOpened': {
+        const rect = layout.boxes[step.box];
+        const away = rect ? rect.y + rect.h + HUD_EXIT_MARGIN : 100;
+        let node: TransformNode | undefined;
+        return [
+          {
+            t0: step.t0,
+            t1: step.t1,
+            start: () => (node = buildBox(step.box, step.colour, 0)),
+            tick: (p) => {
+              if (node) node.position.y = away * (1 - ease(p));
+            },
+          },
+        ];
+      }
+      case 'bufferDrained': {
+        const firstHole = step.fill - step.from.length;
+        const flights = step.from.map((slotIndex, k): Task => {
+          let mesh: Mesh | undefined;
+          return {
+            t0: step.launches[k] ?? step.t0,
+            t1: step.lands[k] ?? step.t1,
+            start: () => {
+              mesh = bufferPins[slotIndex];
+              bufferPins[slotIndex] = undefined;
+            },
+            tick: (p) => {
+              if (!mesh) return;
+              const a = centre(slotRect(slotIndex));
+              const b = centre(holeRect(step.box, firstHole + k));
+              mesh.position.x = lerp(a.x, b.x, ease(p));
+              mesh.position.y = -lerp(a.y, b.y, ease(p));
+            },
+            end: () => {
+              mesh?.dispose();
+              addBoxPin(step.box, firstHole + k, step.colour);
+            },
+          };
+        });
+        const moves: { mesh: Mesh; fromX: number; to: number }[] = [];
+        const closeGaps: Task = {
+          t0: step.lands.at(-1) ?? step.t0,
+          t1: step.t1,
+          start: () => {
+            moves.length = 0;
+            let next = 0;
+            for (const mesh of bufferPins)
+              if (mesh) moves.push({ mesh, fromX: mesh.position.x, to: next++ });
+          },
+          tick: (p) =>
+            moves.forEach(({ mesh, fromX, to }) => {
+              mesh.position.x = lerp(fromX, centre(slotRect(to)).x, ease(p));
+            }),
+          end: () => {
+            bufferPins = [];
+            for (const { mesh, to } of moves) {
+              mesh.name = `buffer-pin-${to}`;
+              mesh.position.x = centre(slotRect(to)).x;
+              bufferPins[to] = mesh;
+            }
+          },
+        };
+        return [...flights, closeGaps];
+      }
+      case 'won':
+      case 'lost':
+        return [{ t0: step.t0, t1: step.t0, end: () => outcomeHandler?.(step.kind) }];
+    }
+  }
+
+  function update(now: number): void {
+    for (const task of tasks) {
+      if (now < task.t0) continue;
+      if (!task.started) {
+        task.started = true;
+        task.start?.();
+      }
+      const span = task.t1 - task.t0;
+      task.tick?.(span > 0 ? Math.min(1, (now - task.t0) / span) : 1);
+      if (now >= task.t1) task.end?.();
+    }
+    tasks = tasks.filter((task) => now < task.t1);
+  }
+  scene.onBeforeRenderObservable.add(() => update(clock()));
+
+  function play(events: readonly RulesEvent[]): void {
+    const result = schedule(events, clock(), tracks, {
+      speed: options.speed,
+      timing: options.timing,
+    });
+    tracks = result.tracks;
+    for (const step of result.steps) tasks.push(...tasksFor(step));
+  }
+
   function draw(state: State): void {
-    pinMeshes.forEach((mesh, i) => mesh.setEnabled(!state.removed[i]));
-    model.parts.forEach((node, p) => node.setEnabled(!hasFallen(level, state, p)));
+    tasks = [];
+    tracks = emptyTracks();
+    pinMeshes.forEach((mesh, i) => {
+      const home = pinHomes[i];
+      if (home) {
+        mesh.parent = home.parent;
+        mesh.position.copyFrom(home.position);
+        mesh.rotationQuaternion = home.rotation.clone();
+      }
+      mesh.isPickable = true;
+      mesh.setEnabled(!state.removed[i]);
+    });
+    model.parts.forEach((node, p) => {
+      node.position.copyFrom(partHomes[p] ?? Vector3.Zero());
+      node.setEnabled(!hasFallen(level, state, p));
+      for (const m of node.getChildMeshes()) m.isPickable = true;
+    });
     drawHud(state);
   }
 
@@ -208,7 +517,7 @@ export function createGameView(
     const eye = camera.position.clone();
     const result: PinCandidate[] = [];
     pinMeshes.forEach((mesh, i) => {
-      if (!mesh.isEnabled()) return;
+      if (state.removed[i] || !mesh.isEnabled()) return;
       mesh.computeWorldMatrix(true);
       const dir = mesh.getDirection(Vector3.Up());
       const head = mesh.getAbsolutePosition().add(dir.scale(PIN.height / 2));
@@ -260,7 +569,7 @@ export function createGameView(
     for (const part of blockersOf(level, state, pin)) flashes.set(part, now);
   }
 
-  function update(now: number): void {
+  function updateFeedback(now: number): void {
     for (const [pin, t0] of wiggles) {
       const mesh = pinMeshes[pin];
       const home = pinHome[pin];
@@ -281,7 +590,7 @@ export function createGameView(
       if (strength === 0) flashes.delete(part);
     }
   }
-  scene.onBeforeRenderObservable.add(() => update(performance.now()));
+  scene.onBeforeRenderObservable.add(() => updateFeedback(clock()));
 
   fitCameras();
 
@@ -312,12 +621,19 @@ export function createGameView(
     candidates,
     highlight,
     blockedTap,
-    update,
+    updateFeedback,
+    play,
+    get onOutcome() {
+      return outcomeHandler;
+    },
+    set onOutcome(fn) {
+      outcomeHandler = fn;
+    },
     pinAt(x, y) {
       const hit = scene.pick(
         x,
         y,
-        (mesh) => mesh.isEnabled() && mesh.layerMask !== HUD_LAYER,
+        (mesh) => mesh.isEnabled() && mesh.isPickable && mesh.layerMask !== HUD_LAYER,
         false,
         camera,
       );

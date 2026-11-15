@@ -123,14 +123,14 @@ describe('game view input support', () => {
     const mesh = view.scene.getMeshByName('pin-engine-1');
     const home = mesh?.position.clone() ?? Vector3.Zero();
     view.blockedTap(pin, state, 1000);
-    view.update(1040);
+    view.updateFeedback(1040);
     expect(Vector3.Distance(mesh?.position ?? home, home)).toBeGreaterThan(0.001);
     const bonnet = view.scene.getTransformNodeByName('part-bonnet');
     const covers = bonnet?.getChildMeshes().filter((m) => m.renderOverlay) ?? [];
     expect(covers.length).toBeGreaterThan(0);
     expect(covers[0]?.overlayColor.r).toBe(1);
     expect(covers[0]?.overlayAlpha).toBeGreaterThan(0);
-    view.update(1000 + FEEDBACK.flashMs + 1);
+    view.updateFeedback(1000 + FEEDBACK.flashMs + 1);
     expect(mesh?.position.equals(home)).toBe(true);
     expect(bonnet?.getChildMeshes().some((m) => m.renderOverlay)).toBe(false);
   });
