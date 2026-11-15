@@ -4,8 +4,11 @@
 // events through the pure Timeline, with overlapping steps (ticket 25).
 import type { LoadedLevel } from '../content/loader';
 import { CANDY } from '../content/palette';
+import { CAMERA, FEEDBACK } from '../input/constants';
+import { turn as turnView } from '../input/camera-control';
+import type { PinCandidate } from '../input/picking';
+import { blockersOf, hasFallen, isBlocked, type State } from '../rules/state';
 import type { RulesEvent } from '../rules/rules';
-import { hasFallen, type State } from '../rules/state';
 import { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera.pure';
 import { Camera } from '@babylonjs/core/Cameras/camera.pure';
 import { FreeCamera } from '@babylonjs/core/Cameras/freeCamera.pure';
@@ -13,14 +16,16 @@ import type { AbstractEngine } from '@babylonjs/core/Engines/abstractEngine.pure
 import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight.pure';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial.pure';
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color.pure';
-import { Quaternion, Vector3 } from '@babylonjs/core/Maths/math.vector.pure';
+import { Matrix, Quaternion, Vector3 } from '@babylonjs/core/Maths/math.vector.pure';
 import { Viewport } from '@babylonjs/core/Maths/math.viewport';
+import { Ray } from '@babylonjs/core/Culling/ray.pure';
 import { CreateCylinder } from '@babylonjs/core/Meshes/Builders/cylinderBuilder.pure';
 import { CreatePlane } from '@babylonjs/core/Meshes/Builders/planeBuilder.pure';
 import { Mesh } from '@babylonjs/core/Meshes/mesh.pure';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode.pure';
 import { Scene } from '@babylonjs/core/scene.pure';
 import { PIN, buildModel, materialCache } from './model-scene';
+import { flashStrength, perpendicular, wiggleOffset } from './pin-feedback';
 import { emptyTracks, schedule, type Step, type Timing, type Tracks } from './timeline';
 import {
   fitDistance,
@@ -73,6 +78,19 @@ export interface GameView {
   onOutcome: ((outcome: 'won' | 'lost') => void) | null;
   /** The Pin under a point in CSS px relative to the canvas, if any. */
   pinAt(x: number, y: number): number | null;
+  /** Zoom, 1 to 2.2. Never changes the turning centre (no panning). */
+  readonly zoom: number;
+  setZoom(zoom: number): void;
+  /** Turntable drag of (dx, dy) CSS px. */
+  turn(dx: number, dy: number): void;
+  /** Pin candidates for picking: projected head, drawn radius, visibility, Blocked, depth. */
+  candidates(state: State): PinCandidate[];
+  /** Press feedback: the Pin grows and gets a white outline. `null` clears it. */
+  highlight(pin: number | null): void;
+  /** Blocked tap feedback at time `now` (ms): shake the Pin, flash its covering Parts red. */
+  blockedTap(pin: number, state: State, now: number): void;
+  /** Advances the feedback animations to `now` (ms). Runs before every render. */
+  updateFeedback(now: number): void;
   /** Call after the canvas changes size. */
   resize(): void;
   dispose(): void;
@@ -126,6 +144,8 @@ export function createGameView(
     mesh.metadata = { pin: i };
     return mesh;
   });
+  const pinHome = pinMeshes.map((mesh) => mesh.position.clone());
+  const pinDir = level.pinSockets.map((socket) => Vector3.FromArray(socket.direction).normalize());
 
   const camera = new ArcRotateCamera(
     'model-camera',
@@ -137,6 +157,7 @@ export function createGameView(
   );
   camera.fov = 0.8;
   camera.minZ = 0.05;
+  let zoom = 1;
 
   // ---- HUD ----
   const hud = new FreeCamera('hud-camera', new Vector3(0, 0, -100), scene);
@@ -160,7 +181,7 @@ export function createGameView(
     const m = layout.model;
     camera.viewport = new Viewport(m.x / w, 1 - (m.y + m.h) / h, m.w / w, m.h / h);
     // The camera targets the turning centre, so it sits at the viewport's (the region's) centre.
-    camera.radius = fitDistance(model.bounds.radius, m, camera.fov);
+    camera.radius = fitDistance(model.bounds.radius, m, camera.fov) / zoom;
   }
 
   function hudPlane(name: string, r: Rect, z: number, hex: string, inset = 1): Mesh {
@@ -486,6 +507,91 @@ export function createGameView(
     drawHud(state);
   }
 
+  // ---- Input support: picking candidates, turning, zoom and tap feedback ----
+  function candidates(state: State): PinCandidate[] {
+    const m = layout.model;
+    const viewMatrix = camera.getViewMatrix(true);
+    const transform = viewMatrix.multiply(camera.getProjectionMatrix(true));
+    const viewport = new Viewport(m.x, m.y, m.w, m.h);
+    const focal = m.h / 2 / Math.tan(camera.fov / 2);
+    const eye = camera.position.clone();
+    const result: PinCandidate[] = [];
+    pinMeshes.forEach((mesh, i) => {
+      if (state.removed[i] || !mesh.isEnabled()) return;
+      mesh.computeWorldMatrix(true);
+      const dir = mesh.getDirection(Vector3.Up());
+      const head = mesh.getAbsolutePosition().add(dir.scale(PIN.height / 2));
+      const screen = Vector3.Project(head, Matrix.IdentityReadOnly, transform, viewport);
+      const depth = Vector3.TransformCoordinates(head, viewMatrix).z;
+      const toHead = head.subtract(eye);
+      const distance = toHead.length();
+      const hit = scene.pickWithRay(
+        new Ray(eye, toHead.scale(1 / distance), distance + 1),
+        (other) => other.isEnabled() && other.layerMask !== HUD_LAYER,
+      );
+      const visible =
+        !hit?.hit || hit.pickedMesh === mesh || (hit.distance ?? 0) >= distance - 0.02;
+      result.push({
+        id: i,
+        x: screen.x,
+        y: screen.y,
+        r: ((PIN.diameter / 2) * focal) / Math.max(depth, 1e-6),
+        visible,
+        blocked: isBlocked(level, state, i),
+        depth,
+      });
+    });
+    return result;
+  }
+
+  let highlighted: number | null = null;
+  function highlight(pin: number | null): void {
+    if (highlighted !== null) {
+      const old = pinMeshes[highlighted];
+      if (old) {
+        old.scaling.setAll(1);
+        old.renderOutline = false;
+      }
+    }
+    highlighted = pin;
+    const mesh = pin === null ? undefined : pinMeshes[pin];
+    if (!mesh) return;
+    mesh.scaling.setAll(FEEDBACK.pressScale);
+    mesh.outlineColor = Color3.White();
+    mesh.outlineWidth = 0.025;
+    mesh.renderOutline = true;
+  }
+
+  const wiggles = new Map<number, number>();
+  const flashes = new Map<number, number>(); // Part index -> start time
+  function blockedTap(pin: number, state: State, now: number): void {
+    wiggles.set(pin, now);
+    for (const part of blockersOf(level, state, pin)) flashes.set(part, now);
+  }
+
+  function updateFeedback(now: number): void {
+    for (const [pin, t0] of wiggles) {
+      const mesh = pinMeshes[pin];
+      const home = pinHome[pin];
+      const dir = pinDir[pin];
+      if (!mesh || !home || !dir) continue;
+      const side = Vector3.FromArray(perpendicular([dir.x, dir.y, dir.z]));
+      mesh.position.copyFrom(home).addInPlace(side.scale(wiggleOffset(now - t0, FEEDBACK)));
+      if (now - t0 >= FEEDBACK.wiggleMs) wiggles.delete(pin);
+    }
+    for (const [part, t0] of flashes) {
+      const strength = flashStrength(now - t0, FEEDBACK);
+      for (const mesh of model.parts[part]?.getChildMeshes() ?? []) {
+        if ((mesh.metadata as { pin?: unknown } | null)?.pin !== undefined) continue;
+        mesh.renderOverlay = strength > 0;
+        mesh.overlayColor = Color3.Red();
+        mesh.overlayAlpha = 0.6 * strength;
+      }
+      if (strength === 0) flashes.delete(part);
+    }
+  }
+  scene.onBeforeRenderObservable.add(() => updateFeedback(clock()));
+
   fitCameras();
 
   return {
@@ -494,6 +600,28 @@ export function createGameView(
       return layout;
     },
     draw,
+    get zoom() {
+      return zoom;
+    },
+    setZoom(z) {
+      zoom = Math.min(CAMERA.zoomMax, Math.max(CAMERA.zoomMin, z));
+      camera.radius = fitDistance(model.bounds.radius, layout.model, camera.fov) / zoom;
+    },
+    turn(dx, dy) {
+      const next = turnView(
+        { yaw: camera.alpha, pitch: camera.beta - Math.PI / 2 },
+        dx,
+        dy,
+        layout.model.w,
+        CAMERA,
+      );
+      camera.alpha = next.yaw;
+      camera.beta = Math.PI / 2 + next.pitch;
+    },
+    candidates,
+    highlight,
+    blockedTap,
+    updateFeedback,
     play,
     get onOutcome() {
       return outcomeHandler;
