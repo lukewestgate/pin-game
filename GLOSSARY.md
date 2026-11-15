@@ -1,4 +1,4 @@
-# Peg Game
+# Pin Game
 
 A puzzle game where the player takes apart a 3D Model by removing its coloured Pins and sorting them into Boxes of the matching colour.
 

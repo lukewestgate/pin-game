@@ -1,4 +1,4 @@
-# Vision: Peg Game, the final game
+# Vision: Pin Game, the final game
 
 From [Vision of the final game](issues/08-vision-of-the-final-game.md). This is a lift-ready section for the spec. It describes where the game is headed, so the first version is built to extend. None of it ships in the first version unless the spec says so.
 

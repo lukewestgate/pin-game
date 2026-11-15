@@ -27,3 +27,5 @@ Also from Pin colours and colour-blind readability: the **Pin head's form**. The
 A rough Babylon prototype, built on `../prototypes/screen-layout.prototype.html` with variant A's layout fixed, showing two or three original styles to switch between.
 
 _Added by [Gesture tuning](13-gesture-tuning.md): the press highlight (Pin grows 1.25× with a white outline) and the red flash on the Part covering a Blocked Pin are settled as behaviour and timing. Their look can be restyled here. A Pin head form that changes the drawn head size also changes the tap target (max(head × 1.6, 36 px)), so check that close Pins can still be told apart._
+
+_Added by [PWA hosting, caching and updates](15-pwa-hosting-caching-and-updates.md): the **app icon** art (one SVG that `@vite-pwa/assets-generator` turns into the 192/512 `any`, 512 `maskable` and 180 `apple-touch-icon` set, with the maskable art inside the 40%-radius safe zone) and the manifest's `theme_color` and `background_color`. The placeholder is a Candy-red Pin head with the cross recess on a neutral background. The game is named **Pin Game**. The font must be precached with the build, so no font CDN._
