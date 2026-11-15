@@ -32,3 +32,14 @@ export function bundledLevels(): LoadedLevel[] {
   }
   return levels.map((l) => l.level);
 }
+
+/** The raw bundled JSON keyed by file name, for the dev viewer's non-throwing loader. */
+export function bundledFiles(): {
+  models: Record<string, unknown>;
+  levels: Record<string, unknown>;
+} {
+  return {
+    models,
+    levels: Object.fromEntries(Object.entries(levelFiles).map(([p, json]) => [fileName(p), json])),
+  };
+}
