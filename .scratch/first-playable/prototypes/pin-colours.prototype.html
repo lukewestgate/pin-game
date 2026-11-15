@@ -147,6 +147,8 @@ const VARIANTS = {
   B: { name: 'Symbol on every Pin', note: 'Each colour also has a symbol on the Pin head, on the car, in the Boxes and in the Buffer. Empty Box slots show their symbol faintly. In the real build: one instanced mesh, symbol picked from a texture atlas by a per-instance index.' },
   C: { name: 'Head shape per colour', note: 'Each colour has its own Pin head silhouette (round, triangle, square, star, plus, hexagon). One instanced mesh per shape: 6 draw calls instead of 1. Only 6 shapes, so past 6 colours shapes repeat (marked in the scores).' },
   D: { name: 'Symbols in Boxes and Buffer only', note: 'Pins on the car are colour only. Once a Pin is in a Box or the Buffer it shows its symbol, and each Box shows its symbol in its empty slots. Helps matching Buffer to Box, not choosing what to tap.' },
+  E: { name: 'Screw cross on every Pin', note: 'Every Pin head has the same cross recess, in a darker shade of its own colour, so Pins read as screws. Decoration only: sorting is still by colour alone. One atlas entry; costs nothing extra with instancing.' },
+  F: { name: 'Screw drive per colour', note: 'Each colour has its own drive recess: cross, slot, hex, Torx, square, triangle, so the screw look doubles as a colour-blind cue. Empty Box slots show their recess. Only 6 drives, so past 6 colours they repeat (marked in the scores).' },
 };
 const PALETTES = {
   // Candy: the bright, saturated toy-colour quality of the human's inspiration, in original values
@@ -175,7 +177,7 @@ const PRESETS = {
 };
 const pick = (k, obj, d) => (obj[params.get(k)] ? params.get(k) : d);
 const S = {
-  variant: pick('variant', VARIANTS, 'A'),
+  variant: pick('variant', VARIANTS, 'E'),
   palette: pick('palette', PALETTES, 'candy'),
   n: Math.max(5, Math.min(10, parseInt(params.get('n')) || 5)),
   cvd: pick('cvd', CVDS, 'none'),
@@ -190,6 +192,7 @@ function pushUrl() {
 }
 const colours = () => PALETTES[S.palette].c.slice(0, S.n);
 const BODY = { cream: '#f3e6c8', tyre: '#3a3d42', hub: '#c9ccd1', interior: '#b8bcc2', chassis: '#7d838a', light: '#fff6c2', engine: '#8a9099' };
+const DRIVES = ['phillips', 'slot', 'hexsock', 'torx', 'robertson', 'tri'];
 const SYMBOLS = ['dot', 'triangle', 'square', 'star', 'plus', 'heart', 'ring', 'moon', 'bolt', 'drop'];
 const SHAPES = ['round', 'triangle', 'square', 'star', 'plus', 'hexagon'];
 const K = { margin: 10, boxGap: 10, boxPad: 6, boxSlotMax: 46, bufGap: 5, bufPad: 6, bufSlotMax: 52, bufToBox: 0.8, pinInSlot: 0.78, rowGap: 8 };
@@ -271,7 +274,14 @@ function drawGlyph(ctx, kind, cx, cy, r) {
     case 'ring': ctx.lineWidth = r * 0.34; ctx.arc(cx, cy, r * 0.62, 0, Math.PI * 2); ctx.stroke(); break;
     case 'moon': ctx.arc(cx, cy, r * 0.8, 0, Math.PI * 2); ctx.fill(); ctx.globalCompositeOperation = 'destination-out'; ctx.beginPath(); ctx.arc(cx + 0.42 * r, cy - 0.25 * r, r * 0.66, 0, Math.PI * 2); ctx.fill(); ctx.globalCompositeOperation = 'source-over'; break;
     case 'bolt': poly([[0.15, -0.95], [-0.6, 0.12], [-0.05, 0.12], [-0.2, 0.95], [0.6, -0.15], [0.05, -0.15]]); break;
-    case 'drop': ctx.moveTo(cx, cy - 0.95 * r); ctx.bezierCurveTo(cx + 0.4 * r, cy - 0.35 * r, cx + 0.75 * r, cy, cx + 0.75 * r, cy + 0.25 * r); ctx.arc(cx, cy + 0.25 * r, 0.75 * r, 0, Math.PI); ctx.bezierCurveTo(cx - 0.75 * r, cy, cx - 0.4 * r, cy - 0.35 * r, cx, cy - 0.95 * r); ctx.fill(); break;
+    // Screw-drive recesses (generic screw features, drawn in-house).
+    case 'phillips': { const t = 0.17, a = 0.78; poly([[-t, -a], [t, -a], [t, -t], [a, -t], [a, t], [t, t], [t, a], [-t, a], [-t, t], [-a, t], [-a, -t], [-t, -t]]); break; }
+    case 'slot': poly([[-0.85, -0.16], [0.85, -0.16], [0.85, 0.16], [-0.85, 0.16]]); break;
+    case 'hexsock': poly(Array.from({ length: 6 }, (_, i) => { const a = i * Math.PI / 3; return [Math.cos(a) * 0.6, Math.sin(a) * 0.6]; })); break;
+    case 'torx': star(6, 0.62); break;
+    case 'robertson': poly([[-0.42, -0.42], [0.42, -0.42], [0.42, 0.42], [-0.42, 0.42]]); break;
+    case 'tri': poly([[0, -0.62], [0.56, 0.38], [-0.56, 0.38]]); break;
+    case 'drop':ctx.moveTo(cx, cy - 0.95 * r); ctx.bezierCurveTo(cx + 0.4 * r, cy - 0.35 * r, cx + 0.75 * r, cy, cx + 0.75 * r, cy + 0.25 * r); ctx.arc(cx, cy + 0.25 * r, 0.75 * r, 0, Math.PI); ctx.bezierCurveTo(cx - 0.75 * r, cy, cx - 0.4 * r, cy - 0.35 * r, cx, cy - 0.95 * r); ctx.fill(); break;
   }
 }
 function glyphMat(kind, ink) {
@@ -325,13 +335,25 @@ function makePin(ci, layer, where) {
   const kind = S.variant === 'C' ? SHAPES[ci % SHAPES.length] : 'round';
   const m = template(kind).clone('pin'); m.setEnabled(true); m.layerMask = layer;
   m.material = mat(hex); outline(m, where === 'car' ? 0.02 : 0.02);
-  const symbol = S.variant === 'B' || (S.variant === 'D' && where !== 'car');
-  if (symbol) {
-    const d = BABYLON.MeshBuilder.CreateDisc('glyph', { radius: PIN_D * 0.4, tessellation: 24 }, scene);
+  const g = decal(ci, where);
+  if (g) {
+    const d = BABYLON.MeshBuilder.CreateDisc('glyph', { radius: PIN_D * 0.42, tessellation: 24 }, scene);
     d.rotation.x = Math.PI / 2; d.position.y = PIN_H + 0.003; d.parent = m; d.layerMask = layer;
-    d.material = glyphMat(SYMBOLS[ci], inkFor(hex));
+    d.material = glyphMat(g.kind, g.ink);
   }
   return m;
+}
+// What is printed on a Pin head of colour ci, if anything. where: 'car' | 'hud' | 'slot' (empty Box slot).
+const darkOf = hex => BABYLON.Color3.FromHexString(hex).scale(0.42).toHexString();
+function decal(ci, where) {
+  const hex = colours()[ci][1];
+  switch (S.variant) {
+    case 'B': return where === 'slot' ? null : { kind: SYMBOLS[ci], ink: inkFor(hex) };
+    case 'D': return where === 'car' || where === 'slot' ? null : { kind: SYMBOLS[ci], ink: inkFor(hex) };
+    case 'E': return where === 'slot' ? null : { kind: 'phillips', ink: darkOf(hex) };
+    case 'F': return where === 'slot' ? null : { kind: DRIVES[ci % DRIVES.length], ink: darkOf(hex) };
+  }
+  return null;
 }
 
 // ---- The car (shapes and Sockets from the screen-layout prototype) -------------------------
@@ -441,7 +463,8 @@ function layout(W, H, ins, buf) {
 function buildHud() {
   hudRoot.getChildMeshes().forEach(m => m.dispose());
   const { boxes, buffer, buf } = LO, cs = colours();
-  const glyphOn = S.variant === 'B' || S.variant === 'D';
+  const glyphOn = ['B', 'D', 'F'].includes(S.variant);
+  const slotGlyph = i => (S.variant === 'F' ? DRIVES[i % DRIVES.length] : SYMBOLS[i]);
   const boxFill = [1, 2, 0];
   for (let i = 0; i < LV.boxes; i++) {
     const hex = cs[i][1], x = boxes.x + i * (boxes.boxW + K.boxGap);
@@ -450,7 +473,7 @@ function buildHud() {
     for (let s = 0; s < LV.cap; s++) {
       const { cx, cy } = boxSlotCentre(s, LV.cap, x, boxes.y, boxes.slot);
       const empty = s >= boxFill[i];
-      hudDisc(cx, cy, boxes.slot * 0.82, slotHex, glyphOn && empty ? { kind: SYMBOLS[i], ink: BABYLON.Color3.FromHexString(slotHex).scale(0.55).toHexString() } : null);
+      hudDisc(cx, cy, boxes.slot * 0.82, slotHex, glyphOn && empty ? { kind: slotGlyph(i), ink: BABYLON.Color3.FromHexString(slotHex).scale(0.55).toHexString() } : null);
       if (S.variant === 'C' && empty) { // faint shape in the empty slot
         const g = BABYLON.MeshBuilder.CreateDisc('hs', { radius: boxes.slot * 0.26, tessellation: 24 }, scene);
         g.position.set(cx, -cy, -2.2); g.parent = hudRoot; g.layerMask = HUD_LAYER;
@@ -514,7 +537,7 @@ function swatches() {
   const host = $('swatches'); host.innerHTML = '';
   colours().forEach(([n, hex], i) => {
     const d = document.createElement('div'); d.style.background = hex; d.title = `${n} ${hex}`;
-    if (S.variant === 'B' || S.variant === 'D') d.style.backgroundImage = `url(${glyphDataUrl(SYMBOLS[i], inkFor(hex))})`, d.style.backgroundSize = '70%', d.style.backgroundRepeat = 'no-repeat', d.style.backgroundPosition = 'center';
+    const g = decal(i, 'hud'); if (g) d.style.backgroundImage = `url(${glyphDataUrl(g.kind, g.ink)})`, d.style.backgroundSize = '70%', d.style.backgroundRepeat = 'no-repeat', d.style.backgroundPosition = 'center';
     else if (S.variant === 'C') { d.textContent = SHAPES[i % SHAPES.length]; d.style.color = inkFor(hex); d.style.fontSize = '8px'; }
     host.appendChild(d);
   });
@@ -532,6 +555,7 @@ function scores() {
     }
     html += `<tr${S.cvd === sim ? ' style="font-weight:600"' : ''}><td>${CVDS[sim]}</td><td>${pair}</td><td class="num ${cls(min)}">${min.toFixed(1)}</td><td>${bpair}</td><td class="num ${cls(bmin)}">${bmin.toFixed(1)}</td></tr>`;
   }
+  if (S.variant === 'F' && S.n > DRIVES.length) html += `<tr><td colspan="5" class="bad">Only ${DRIVES.length} drive types: colours ${DRIVES.length + 1}–${S.n} repeat a drive.</td></tr>`;
   if (S.variant === 'C' && S.n > SHAPES.length) html += `<tr><td colspan="5" class="bad">Only ${SHAPES.length} head shapes: colours ${SHAPES.length + 1}–${S.n} repeat a shape.</td></tr>`;
   $('scores').innerHTML = html;
 }
