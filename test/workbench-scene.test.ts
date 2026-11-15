@@ -4,7 +4,8 @@ import type { Mesh } from '@babylonjs/core/Meshes/mesh.pure';
 import { afterEach, describe, expect, it } from 'vitest';
 import { bundledLevels } from '../src/content/bundled';
 import { createGameView, type GameView } from '../src/render/game-view';
-import { initialState } from '../src/rules/rules';
+import { initialState, tap } from '../src/rules/rules';
+import { solve } from '../src/solver/solve';
 
 let current: { view: GameView; engine: NullEngine } | null = null;
 afterEach(() => {
@@ -23,10 +24,11 @@ function build() {
     deterministicLockstep: false,
     lockstepMaxSteps: 1,
   });
-  const view = createGameView(engine, level);
+  const clock = { now: 0 };
+  const view = createGameView(engine, level, undefined, { clock: () => clock.now });
   current = { view, engine };
   view.draw(initialState(level).state);
-  return { level, view };
+  return { level, view, clock };
 }
 
 describe('Workbench look in the scene', () => {
@@ -36,29 +38,34 @@ describe('Workbench look in the scene', () => {
     expect(template.instances.length).toBeGreaterThanOrEqual(level.pinSockets.length);
     for (const socket of level.pinSockets) {
       const head = view.scene.getMeshByName(`pin-${socket.id}`);
-      const ink = view.scene.getMeshByName(`pin-${socket.id}-ink`);
+      const ink = view.scene.getMeshByName(`ink-pin-${socket.id}`);
       expect(head).toBeTruthy();
       expect(ink?.parent).toBe(head);
-      expect(ink?.isPickable).toBe(false);
+      expect(ink?.metadata).toEqual({ decor: true });
     }
   });
 
   it('outlines Pins only: Part meshes and HUD planes get none', () => {
     const { view } = build();
-    const inks = view.scene.meshes.filter((m) => m.name.endsWith('-ink'));
+    const inks = view.scene.meshes.filter((m) => m.name.startsWith('ink-'));
     expect(inks.length).toBeGreaterThan(0);
-    expect(inks.every((m) => m.name.startsWith('pin-') || m.name.includes('-pin-'))).toBe(true);
+    expect(inks.every((m) => /^ink-(pin|box-\d+-pin|buffer-pin)-/.test(m.name))).toBe(true);
     const part = view.scene.meshes.find((m) => m.material?.name.startsWith('mat-'));
     expect(part?.material?.pluginManager?.getPlugin('Toon')).toBeTruthy();
   });
 
   it('shows the shank only while a Pin pops out', () => {
-    const { level, view } = build();
-    const shank = view.scene.getMeshByName(`pin-${level.pinSockets[0]?.id}-shank`);
+    const { level, view, clock } = build();
+    const first = solve(level).path[0] ?? 0;
+    const id = level.pinSockets[first]?.id;
+    const shank = view.scene.getMeshByName(`shank-pin-${id}`);
     expect(shank?.isEnabled()).toBe(false);
-    view.popOut(0, 0.2);
+    view.play(tap(level, initialState(level).state, first).events);
+    clock.now += 60; // part-way through the pull
+    view.scene.render();
     expect(shank?.isEnabled()).toBe(true);
-    view.popOut(0, null);
+    clock.now += 5000;
+    view.scene.render();
     expect(shank?.isEnabled()).toBe(false);
   });
 });

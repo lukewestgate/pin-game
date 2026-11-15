@@ -176,12 +176,14 @@ export function createPinFactory(scene: Scene, home: TransformNode): PinFactory 
       instance.parent = parent;
       instance.instancedBuffers.pinColor = Color3.FromHexString(hex);
       instance.instancedBuffers.markIndex = mark;
-      const ink = outline.createInstance(`${name}-ink`);
+      const ink = outline.createInstance(`ink-${name}`);
       ink.parent = instance;
       ink.isPickable = false;
-      const thread = shank.createInstance(`${name}-shank`);
+      ink.metadata = { decor: true };
+      const thread = shank.createInstance(`shank-${name}`);
       thread.parent = instance;
       thread.isPickable = false;
+      thread.metadata = { decor: true };
       thread.setEnabled(false);
       return {
         head: instance,

@@ -20,8 +20,8 @@
 - Headless-tested: bevel formulas, pan-head and outline and shank geometry, atlas pixels, toon bands, render-quality helpers, and (NullEngine) one instanced head mesh, outlines on Pins only, shank only on pop-out. **Needs eyes on a real GPU** (shaders can't compile under NullEngine): the toon plugin, the Head-mark recess look (floor shift direction), outline thickness, and 4x MSAA.
 - Toon is an own ramp in a `StandardMaterial` plugin (`src/render/toon.ts`), not `CellMaterial`. Bands: x0.58 / x0.8 / x1.0 at light 0 / 0.5 / 0.85. The plugins do use small GLSL snippets (the only way to hook a plugin), but no raw `ShaderMaterial`.
 - "One instanced mesh" is Babylon `InstancedMesh` instances of one head template (with `registerInstancedBuffer` for colour and mark index), not thin instances: Pins need per-instance parenting to moving Parts and enable/disable. Each head carries two child instances: an inverted-hull ink outline and the shank.
-- Added `GameView.popOut(pin, length | null)` for the Timeline (ticket 25) to show the shank while a Pin lifts.
-- Pin picking: the pick predicate now also requires `isVisible` and `isPickable` (Babylon skips those checks when a predicate is given), so outlines and shanks are never hit.
+- The shank is driven by the Timeline's pull task in `game-view.ts` (length = the pull distance, hidden at fly-off and on `draw`).
+- Pin picking: outline and shank instances carry `metadata.decor` and the pick predicate skips them (ticket 25's `draw` resets `isPickable` on every Part child, so the flag alone isn't enough).
 - The atlas has 8 cells, only the cross filled; it is not mipmapped. Ticket 30 fills the other cells.
 - MSAA: 4x comes from the WebGL context's `antialias: true` (browser decides the sample count); the DPR cap is `hardwareScalingFor` in `render-quality.ts`.
 
