@@ -12,6 +12,7 @@
     "dev": "vite",
     "build": "pnpm check && vite build",
     "preview": "vite preview",
+    "solve": "tsx scripts/solve.ts",
     "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm format:check",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
