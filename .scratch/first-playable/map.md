@@ -50,7 +50,7 @@ A buildable spec for the **first playable version**: the full Box/Buffer sorting
 
 <!-- 2026-11-15: all fog graduated into tickets. Screen layout and HUD look became Screen layout and HUD plus Pin colours and colour-blind readability. Gesture tuning became Gesture tuning. PWA specifics became PWA facts for Vite and iOS plus PWA hosting, caching and updates. Sound became Sound in the first version. -->
 
-Nothing left in the fog, and no open tickets. The way is clear: hand off to `/to-spec`.
+- [Car Model toy look](issues/19-car-model-toy-look.md) (open, prototype): three toy takes on the car (vinyl toy, brick-built, wooden toy) with the same Parts, Sockets and covering, waiting for the human's pick. Hand off to `/to-spec` once it's resolved.
 
 ## Out of scope
 
