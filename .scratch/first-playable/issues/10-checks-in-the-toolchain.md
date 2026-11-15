@@ -1,7 +1,7 @@
 # Checks in the toolchain
 
 Type: grilling
-Status: open
+Status: claimed
 Parent: ../map.md
 Blocked by: 06
 
