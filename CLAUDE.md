@@ -1,3 +1,7 @@
+## Setup
+
+Run `pnpm install` first, then verify with `pnpm check`. Use the `pnpm` scripts rather than `npx`, which downloads unrelated packages when dependencies are missing. A pre-commit hook (`.githooks/`, wired by `pnpm install`) runs `pnpm check`.
+
 ## Commit messages
 
 Keep commit messages relatively concise, in this format:
