@@ -1,18 +1,8 @@
 import type { z } from 'zod';
 import { makeLevel, type Level } from '../rules/level';
 import { CANDY } from './palette';
+import { ContentError, validateLevel, validateModel } from './validate';
 import { levelSchema, modelSchema, type LevelData, type ModelData, type Socket } from './schema';
-
-/** A content error that names the file, and the Part or Socket id where there is one. */
-export class ContentError extends Error {
-  constructor(
-    readonly file: string,
-    message: string,
-  ) {
-    super(`${file}: ${message}`);
-    this.name = 'ContentError';
-  }
-}
 
 /** A rules Level plus what the screen needs to draw it. Pin `i` sits in `pinSockets[i]`. */
 export interface LoadedLevel extends Level {
@@ -78,9 +68,18 @@ export function loadLevel(
   modelFiles: Readonly<Record<string, unknown>>,
 ): LoadedLevel {
   const level = parseLevel(levelJson, file);
-  const model = Object.entries(modelFiles)
-    .map(([modelFile, json]) => parseModel(json, modelFile))
-    .find((m) => m.id === level.model);
-  if (!model) throw new ContentError(file, `unknown Model id ${level.model}`);
+  const models = Object.entries(modelFiles).map(([modelFile, json]) => {
+    return { file: modelFile, data: parseModel(json, modelFile) };
+  });
+  const modelIds = new Set<string>();
+  for (const m of models) {
+    if (modelIds.has(m.data.id)) throw new ContentError(file, `duplicate Model id ${m.data.id}`);
+    modelIds.add(m.data.id);
+  }
+  const found = models.find((m) => m.data.id === level.model);
+  if (!found) throw new ContentError(file, `unknown Model id ${level.model}`);
+  const model = found.data;
+  validateModel(model, found.file);
+  validateLevel(level, model, file);
   return compileLevel(level, model, file);
 }

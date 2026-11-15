@@ -1,5 +1,6 @@
 // Models and Levels shipped with the game, bundled at build time so they're versioned with the code.
 import { loadLevel, type LoadedLevel } from './loader';
+import { ContentError } from './validate';
 
 const modelFiles = import.meta.glob<unknown>('../data/models/*.json', {
   eager: true,
@@ -18,7 +19,16 @@ const models = Object.fromEntries(
 
 /** Every shipped Level, loaded and compiled, in file-name order. */
 export function bundledLevels(): LoadedLevel[] {
-  return Object.entries(levelFiles)
+  const levels = Object.entries(levelFiles)
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([path, json]) => loadLevel(json, fileName(path), models));
+    .map(([path, json]) => ({
+      file: fileName(path),
+      level: loadLevel(json, fileName(path), models),
+    }));
+  const seen = new Set<string>();
+  for (const { file, level } of levels) {
+    if (seen.has(level.id)) throw new ContentError(file, `duplicate Level id ${level.id}`);
+    seen.add(level.id);
+  }
+  return levels.map((l) => l.level);
 }
