@@ -2,6 +2,8 @@
 
 Status: ready-for-agent
 
+Build tickets: [20](issues/20-walking-skeleton.md) to [35](issues/35-device-checklist.md) in `issues/` (01–19 are the wayfinding decision tickets).
+
 Synthesised from the resolved [first-playable map](map.md), its 19 tickets, the [vision](vision.md), `GLOSSARY.md` and ADRs 0001–0003. Where this spec is brief, the linked ticket's `## Answer` holds the exact numbers and is authoritative.
 
 ## Problem Statement
