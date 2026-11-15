@@ -84,6 +84,7 @@ if (devContent) {
   });
 }
 
+/** Snaps the screen to the present state, cancelling every animation (Undo, Restart). */
 function show(): void {
   devViewer?.update(history.present);
   view.draw(history.present);
@@ -91,11 +92,19 @@ function show(): void {
   undoButton.disabled = !canUndo(history);
 }
 
+// Win and lose show only once everything has settled.
+view.onOutcome = (outcome) => {
+  statusText.textContent = STATUS[outcome];
+};
+
 function tapPin(pin: number): void {
   const result = tap(level, history.present, pin);
   if (result.refused) return;
   history = commit(history, result.state);
-  show();
+  devViewer?.update(history.present);
+  view.play(result.events);
+  statusText.textContent = STATUS.playing;
+  undoButton.disabled = !canUndo(history);
 }
 
 let press: { id: number; x: number; y: number } | null = null;
