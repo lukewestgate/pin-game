@@ -1,7 +1,7 @@
 # UI visual style
 
 Type: prototype
-Status: open
+Status: claimed
 Parent: ../map.md
 Blocked by: 11, 12, 18
 

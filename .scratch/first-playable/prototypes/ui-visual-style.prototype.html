@@ -1,0 +1,991 @@
+<!doctype html>
+<!--
+  PROTOTYPE · throwaway. Ticket: UI visual style (issues/17-ui-visual-style.md).
+  Plan: three original visual styles on the fixed layout from Screen layout and HUD (variant A),
+  switched by ?style=A|B|C (bottom bar or ← →). Each style presets a set of knobs (shading,
+  outlines, bevels, Pin head form, where the colour-blind switch lives) that the panel can then
+  mix and match. The car, Box row and Buffer are Babylon meshes (HUD by an orthographic camera in
+  CSS px, ADR 0002); text and buttons are DOM. The background is CSS behind a transparent canvas,
+  so it fills the landscape letterbox for free.
+  Inspiration qualities: research/05-screwdom-3d-visual-style.md section 10. No assets, icons or
+  values are taken from that game: icons are drawn here as SVG, fonts are SIL OFL Google Fonts
+  (loaded from the CDN only in this prototype; the real build self-hosts and precaches them).
+  Run: double-click, or for a phone:  python3 -m http.server 8000 --bind 0.0.0.0  in this folder,
+  then open http://<this-machine>:8000/ui-visual-style.prototype.html?device=window on the phone.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>PROTOTYPE: UI visual style</title>
+<script>
+  window.onerror = (msg, src, line) => { const t = document.getElementById('err'); if (t) { t.style.display = 'block'; t.textContent = 'ERROR: ' + msg + ' (line ' + line + ')'; } };
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;800&family=Fredoka:wght@500;600;700&family=Lilita+One&display=swap" rel="stylesheet">
+<script src="https://cdn.babylonjs.com/babylon.js"></script>
+<script src="https://cdn.babylonjs.com/materialsLibrary/babylonjs.materials.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; font: 14px/1.45 system-ui, sans-serif; color: #1c2024; background: #2b2f36; overscroll-behavior: none; }
+  body { display: flex; overflow: hidden; }
+  #desk { flex: 1; display: flex; align-items: center; justify-content: center; min-width: 0; }
+  #frameWrap { flex: none; transform-origin: center center; }
+  #stage { position: relative; overflow: hidden; border-radius: 28px; box-shadow: 0 0 0 10px #111, 0 10px 40px #0008; }
+  #stage.desktop { border-radius: 6px; box-shadow: 0 0 0 1px #000, 0 10px 40px #0008; }
+  body.real #desk { display: block; }
+  body.real #stage { position: fixed; inset: 0; width: 100vw !important; height: 100dvh !important; border-radius: 0; box-shadow: none; }
+  #c { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; outline: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  #overlay { position: absolute; inset: 0; pointer-events: none; }
+  #overlay > * { position: absolute; }
+  #tag { font: 10px/1 ui-monospace, monospace; opacity: .45; pointer-events: none; }
+  #err { display: none; position: fixed; top: 0; left: 0; right: 0; z-index: 99; background: #c00; color: #fff; padding: 6px 10px; font: 12px ui-monospace, monospace; }
+  .notch { background: #000; border-radius: 0 0 18px 18px; }
+  .homebar { background: #0008; border-radius: 3px; }
+
+  /* ---------- Game chrome (DOM: text and buttons only) ---------- */
+  .gbtn { pointer-events: auto; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 0; cursor: pointer;
+          -webkit-tap-highlight-color: transparent; touch-action: manipulation; transition: transform .06s, box-shadow .06s, border-width .06s; position: relative; }
+  .gbtn svg { width: 24px; height: 24px; flex: none; }
+  .gbtn .badge { position: absolute; top: -6px; right: -6px; min-width: 18px; height: 18px; border-radius: 9px; font: 700 10px/18px system-ui, sans-serif; padding: 0 4px; text-align: center; }
+  .gbtn .devtag { position: absolute; top: -7px; left: 8px; font: 700 9px/1 ui-monospace, monospace; padding: 2px 4px; border-radius: 4px; background: #6b4e00; color: #fff4c2; letter-spacing: .05em; }
+  .bufBadge { pointer-events: none; display: flex; align-items: center; justify-content: center; }
+  .sheet { pointer-events: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+  .sheet label { display: flex; align-items: center; justify-content: space-between; gap: 14px; cursor: pointer; }
+  .sw { width: 42px; height: 24px; border-radius: 12px; position: relative; flex: none; }
+  .sw::after { content: ''; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: left .12s; }
+  .sw.on::after { left: 21px; }
+  .banner { pointer-events: auto; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  .banner .card { position: relative; display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; }
+  .banner h2 { margin: 0; text-transform: uppercase; }
+  .banner p { margin: 0 0 6px; }
+  .banner .gbtn { padding: 0 26px; height: 50px; }
+  .rays, .spark { position: absolute; pointer-events: none; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes bounceIn { 0% { transform: scale(.3); opacity: 0; } 60% { transform: scale(1.08); opacity: 1; } 80% { transform: scale(.96); } 100% { transform: scale(1); } }
+  @keyframes fadeUp { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+  @keyframes slideIn { from { transform: translateX(-110%); } 70% { transform: translateX(3%); } to { transform: none; } }
+  @keyframes slap { 0% { transform: scale(1.7) rotate(-14deg); opacity: 0; } 70% { transform: scale(.94) rotate(var(--rot)); opacity: 1; } 100% { transform: scale(1) rotate(var(--rot)); } }
+  @keyframes twinkle { 0%, 100% { transform: scale(0) rotate(45deg); opacity: 0; } 50% { transform: scale(1) rotate(45deg); opacity: 1; } }
+  @keyframes shake { 0%, 100% { transform: translateX(0); } 20% { transform: translateX(-3px); } 40% { transform: translateX(3px); } 60% { transform: translateX(-2px); } 80% { transform: translateX(2px); } }
+  @keyframes dim { from { opacity: 0; } }
+
+  /* ===== Style A · Soft toy ===== */
+  .sA { --ink: #1f2a52; --surface: #fff6e6; --rim: #e2cfa9; --go: #2fbf45; --goRim: #1f8f32; --reward: #ffc21a; --fail: #ff3b47; font-family: Fredoka, system-ui, sans-serif; }
+  .sA .gbtn { background: var(--surface); color: var(--ink); border: 3px solid var(--rim); border-bottom-width: 7px; border-radius: 16px; font: 600 16px/1 Fredoka, system-ui, sans-serif; }
+  .sA .gbtn:active { border-bottom-width: 4px; transform: translateY(3px); }
+  .sA .gbtn.dev { background: #fff1a8; border-color: #e0c454; color: #6b4e00; }
+  .sA .gbtn .badge { background: var(--go); color: #fff; border: 2px solid var(--surface); }
+  .sA .gbtn.go { background: var(--go); border-color: var(--goRim); color: #fff; font-size: 19px; text-shadow: 0 2px 0 #0003; }
+  .sA .bufBadge { display: none; }
+  .sA .sheet { background: var(--surface); border: 3px solid var(--rim); border-radius: 16px; color: var(--ink); font: 600 15px Fredoka, system-ui; box-shadow: 0 6px 16px #1f2a5233; }
+  .sA .sw { background: #cfd5e3; } .sA .sw.on { background: var(--go); }
+  .sA .banner { background: #1f2a5266; animation: dim .25s; }
+  .sA .card { background: var(--surface); border: 4px solid var(--ink); border-radius: 28px; padding: 20px 26px 20px; box-shadow: 0 8px 0 var(--ink); animation: bounceIn .5s both; }
+  .sA h2 { font: 700 36px/1.05 Fredoka, system-ui; color: var(--reward); -webkit-text-stroke: 8px var(--ink); paint-order: stroke fill; letter-spacing: .02em; }
+  .sA p { font: 500 16px Fredoka, system-ui; color: var(--ink); }
+  .sA .lose { background: #1f2a5240; }
+  .sA .lose .card { animation: fadeUp .35s both; border-color: #56607f; box-shadow: 0 8px 0 #56607f; }
+  .sA .lose h2 { color: #fff; -webkit-text-stroke-color: #56607f; }
+  .sA .win .rays { width: 560px; height: 560px; border-radius: 50%; background: repeating-conic-gradient(#fff7 0 9deg, #fff0 9deg 22deg); -webkit-mask: radial-gradient(#000 20%, #0000 68%); mask: radial-gradient(#000 20%, #0000 68%); animation: spin 14s linear infinite; }
+  .sA .spark { width: 12px; height: 12px; background: #fff; border-radius: 2px; animation: twinkle 1.6s ease-in-out infinite; box-shadow: 0 0 8px #fff; }
+
+  /* ===== Style B · Workbench ===== */
+  .sB { --ink: #13202a; --surface: #2c3f49; --accent: #13a3c4; --accentDk: #0b6f86; --go: #3ccf4e; --goDk: #228a31; --reward: #ffd60a; --fail: #ff3b47; font-family: 'Baloo 2', system-ui, sans-serif; }
+  .sB .gbtn { background: var(--accent); color: #fff; border: 0; border-radius: 999px; box-shadow: 0 4px 0 var(--accentDk), 0 7px 12px #0005; font: 800 16px/1 'Baloo 2', system-ui; }
+  .sB .gbtn:active { transform: translateY(3px); box-shadow: 0 1px 0 var(--accentDk), 0 3px 6px #0005; }
+  .sB .gbtn.dev { background: #f1d36b; color: #4d3a00; box-shadow: 0 4px 0 #a88a20, 0 7px 12px #0005; }
+  .sB .gbtn .badge { background: var(--reward); color: var(--ink); }
+  .sB .gbtn.go { background: var(--go); box-shadow: 0 5px 0 var(--goDk), 0 8px 14px #0005; font-size: 20px; }
+  .sB .bufBadge { display: none; }
+  .sB .sheet { background: var(--surface); border-radius: 18px; color: #fff; font: 600 15px 'Baloo 2', system-ui; box-shadow: 0 8px 20px #0007; border: 2px solid #ffffff1a; }
+  .sB .sw { background: #ffffff33; } .sB .sw.on { background: var(--accent); }
+  .sB .banner { background: #0008; animation: dim .25s; }
+  .sB .card { width: 100%; background: var(--reward); padding: 18px 16px 20px; box-shadow: 0 6px 0 #b39300, 0 0 0 0 #0000; outline: 2px dashed #13202a40; outline-offset: -9px; animation: slideIn .5s cubic-bezier(.2,1.2,.4,1) both; }
+  .sB h2 { font: 800 38px/1 'Baloo 2', system-ui; color: var(--ink); letter-spacing: .01em; }
+  .sB p { font: 600 16px 'Baloo 2', system-ui; color: #13202acc; }
+  .sB .lose .card { background: #5a6b75; box-shadow: 0 6px 0 #3b4850; }
+  .sB .lose h2, .sB .lose p { color: #fff; }
+  .sB .win .rays { display: none; }
+  .sB .spark { width: 9px; height: 9px; background: #fff6c2; border-radius: 2px; animation: twinkle 1.3s ease-in-out infinite; }
+
+  /* ===== Style C · Sticker ===== */
+  .sC { --ink: #1b1b22; --surface: #ffffff; --accent: #2f6bff; --go: #3ccf4e; --reward: #ffd60a; --fail: #ff3b47; font-family: 'Lilita One', system-ui, sans-serif; }
+  .sC .gbtn { background: var(--surface); color: var(--ink); border: 3px solid var(--ink); border-radius: 12px; box-shadow: 4px 4px 0 var(--ink); font: 400 17px/1 'Lilita One', system-ui; text-transform: uppercase; letter-spacing: .03em; }
+  .sC .gbtn:active { transform: translate(3px, 3px); box-shadow: 1px 1px 0 var(--ink); }
+  .sC .gbtn.dev { background: #fff1a8; }
+  .sC .gbtn .badge { background: var(--accent); color: #fff; border: 2px solid var(--ink); line-height: 14px; }
+  .sC .gbtn.go { background: var(--go); font-size: 20px; }
+  .sC .bufBadge { font: 400 15px/1 'Lilita One', system-ui; color: var(--ink); background: #fff; border: 3px solid var(--ink); border-radius: 10px; box-shadow: 3px 3px 0 var(--ink); }
+  .sC .bufBadge.warn { background: #ff9419; }
+  .sC .bufBadge.last { background: var(--fail); color: #fff; animation: shake .45s 3; }
+  .sC .sheet { background: #fff; border: 3px solid var(--ink); border-radius: 12px; box-shadow: 5px 5px 0 var(--ink); color: var(--ink); font: 400 16px 'Lilita One', system-ui; text-transform: uppercase; }
+  .sC .sw { background: #ddd; border: 2px solid var(--ink); } .sC .sw::after { top: 1px; left: 1px; border: 2px solid var(--ink); } .sC .sw.on { background: var(--accent); } .sC .sw.on::after { left: 19px; }
+  .sC .banner { background: #1b1b2233; animation: dim .2s; }
+  .sC .card { --rot: -4deg; background: var(--reward); border: 4px solid var(--ink); border-radius: 18px; padding: 18px 26px 22px; box-shadow: 8px 8px 0 var(--ink); animation: slap .35s cubic-bezier(.3,1.3,.5,1) both; }
+  .sC h2 { font: 400 42px/1 'Lilita One', system-ui; color: var(--ink); letter-spacing: .02em; }
+  .sC p { font: 400 17px 'Lilita One', system-ui; color: var(--ink); opacity: .75; }
+  .sC .lose .card { --rot: 3deg; background: #e4e4ea; }
+  .sC .win .rays { width: 600px; height: 600px; background: repeating-conic-gradient(#ffffff 0 8deg, #fff0 8deg 20deg); opacity: .55; animation: spin 20s linear infinite; border-radius: 50%; }
+  .sC .spark { width: 14px; height: 14px; background: #fff; border: 3px solid var(--ink); animation: twinkle 1.2s steps(3) infinite; }
+
+  /* ---------- dev panel + switcher (not part of the design under review) ---------- */
+  #panel { width: 420px; flex: none; height: 100dvh; overflow: auto; padding: 14px 16px 80px; background: #fff; }
+  body.real #panel, body.narrow #panel { position: fixed; inset: 0; width: auto; z-index: 20; display: none; }
+  body.panelOpen #panel { display: block; }
+  #panel h1 { font-size: 16px; margin: 0 0 4px; }
+  #panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #60646c; margin: 16px 0 6px; }
+  #panel p, #panel li { margin: 3px 0 6px; font-size: 13px; }
+  #panel ul { padding-left: 18px; margin: 4px 0; }
+  .muted { color: #60646c; font-size: 12px; }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 5px 0; }
+  .seg button { font: inherit; font-size: 13px; padding: 5px 9px; border: 1px solid #e0e1e6; background: #fff; border-radius: 6px; cursor: pointer; }
+  .seg button.on { background: #3e63dd; color: #fff; border-color: #3e63dd; }
+  .seg button.def { box-shadow: inset 0 -2px 0 #3e63dd66; }
+  select { font: inherit; font-size: 13px; padding: 3px 5px; }
+  table.read { border-collapse: collapse; font-size: 12px; width: 100%; }
+  table.read td { padding: 2px 4px; border-bottom: 1px solid #f0f0f3; vertical-align: middle; }
+  table.read td:last-child { font-family: ui-monospace, monospace; text-align: right; }
+  .chip { display: inline-block; width: 14px; height: 14px; border-radius: 4px; vertical-align: -2px; margin-right: 6px; box-shadow: inset 0 0 0 1px #0002; }
+  #icons { display: flex; gap: 14px; align-items: flex-end; }
+  #icons figure { margin: 0; text-align: center; font-size: 11px; color: #60646c; }
+  #switcher { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 30; display: flex; align-items: center; gap: 2px; background: #111d; color: #fff; padding: 4px; border-radius: 999px; box-shadow: 0 4px 16px #0006; font: 13px/1 system-ui, sans-serif; -webkit-user-select: none; user-select: none; }
+  #switcher button { font: inherit; color: #fff; background: transparent; border: 0; padding: 7px 11px; border-radius: 999px; cursor: pointer; }
+  #switcher button:hover { background: #fff2; }
+  #vlabel { padding: 0 6px; min-width: 150px; text-align: center; white-space: nowrap; }
+  body.real #switcher { bottom: auto; top: calc(env(safe-area-inset-top) + 150px); opacity: .85; }
+  #probe { position: fixed; visibility: hidden; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+</style>
+</head>
+<body>
+<div id="err"></div>
+<div id="desk">
+  <div id="frameWrap">
+    <div id="stage">
+      <canvas id="c"></canvas>
+      <div id="overlay"></div>
+    </div>
+  </div>
+</div>
+
+<div id="panel">
+  <h1>UI visual style · prototype</h1>
+  <p class="muted">Throwaway. Drag to turn the car, pinch or scroll to zoom. <b>Tap a Pin</b> to see the press highlight and the pop-out with its threaded shank. <b>Tap a Part</b> to see the blocked flash. Layout is fixed (Screen layout and HUD, variant A). Only the look is in question.</p>
+
+  <h2>Style (also ← → or the bottom bar)</h2>
+  <div class="row seg" id="segStyle"></div>
+  <p class="muted" id="styleNote"></p>
+
+  <h2>Mix and match (resets to the style's picks on a style change; underlined = the style's pick)</h2>
+  <div class="row seg" id="segShading"><span class="muted">Shading:</span></div>
+  <div class="row seg" id="segOutlines"><span class="muted">Ink outlines:</span></div>
+  <div class="row seg" id="segBevel"><span class="muted">Bevels:</span></div>
+  <div class="row seg" id="segHead"><span class="muted">Pin head:</span></div>
+  <div class="row seg" id="segSettings"><span class="muted">Colour-blind switch:</span></div>
+
+  <h2>Scene state</h2>
+  <div class="row"><span class="muted">Buffer filled:</span> <input type="range" id="rFill" min="0" max="5" value="3"> <span id="fillLbl"></span></div>
+  <div class="row seg" id="segBanner"><span class="muted">Banner:</span></div>
+  <div class="row"><label><input type="checkbox" id="chkCb"> Colour-blind setting on (screw drive per colour)</label></div>
+  <div class="row"><label><input type="checkbox" id="chkMute"> Muted</label></div>
+
+  <h2>Screen</h2>
+  <div class="row"><select id="selDevice"></select> <label><input type="checkbox" id="chkRotate"> Landscape (letterbox)</label></div>
+
+  <h2>Colour roles (built from Candy)</h2>
+  <table class="read" id="roles"></table>
+
+  <h2>Type</h2>
+  <p id="typeNote"></p>
+
+  <h2>App icon (192/512 any, 512 maskable, 180 apple-touch)</h2>
+  <div id="icons"></div>
+  <p class="muted">Dashed circle: the maskable safe zone (40% radius). The head sits inside it, so any launcher mask keeps it whole.</p>
+
+  <h2>Measured (CSS px)</h2>
+  <table class="read" id="read"></table>
+
+  <h2>What to judge</h2>
+  <ul>
+    <li><b>Car:</b> Lambert with no outlines (A), soft toon with outlines on the Pins only (B), or toon with ink outlines everywhere (C)? Do the bevels make it read as a toy?</li>
+    <li><b>Pin head:</b> domed flush disc, taller pan head, or the old tapered cylinder? Is the cross recess still readable at 1× on the 360-wide screen? Turn on the colour-blind setting: can you tell the drives apart?</li>
+    <li><b>Boxes:</b> tinted rim around a white panel (A), solid tin (B) or flat sticker (C)? Does an empty slot read as a hole?</li>
+    <li><b>Buffer warning:</b> drag “Buffer filled” to 5. Slots warming plus a pulse (A), amber rings then a red pulse (B), or a counter badge that shakes (C)?</li>
+    <li><b>Background:</b> pale gradient, dark slate vignette, or warm stripes? Try Landscape: it fills the letterbox.</li>
+    <li><b>Buttons, type, banners:</b> candy, pill or sticker? Bounce-in card, ribbon, or slapped sticker?</li>
+    <li><b>Colour-blind switch:</b> its own button in the bar, or a small settings sheet behind one button (with Sound)?</li>
+  </ul>
+</div>
+
+<div id="switcher">
+  <button id="prev" title="Previous style (←)">‹</button>
+  <span id="vlabel"></span>
+  <button id="next" title="Next style (→)">›</button>
+  <button id="panelToggle" title="Panel">⚙</button>
+</div>
+<div id="probe"></div>
+
+<script>
+// ===================================================================
+// Config and URL state
+const $ = id => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+const V3 = BABYLON.Vector3, C3 = BABYLON.Color3;
+
+// Candy palette (Pin colours and colour-blind readability). The car uses the first 5.
+const PALETTE = ['#ff3b47', '#ffd60a', '#3ccf4e', '#2f6bff', '#ff6fc8'];
+const DRIVES = ['phillips', 'slot', 'hexsock', 'torx', 'robertson', 'tri'];
+
+const STYLES = {
+  A: {
+    name: 'Soft toy',
+    note: 'Closest to the inspiration’s qualities. Lambert-like shading with no outlines, bevelled chunky shapes, a pale cool gradient. Boxes have the colour in a thick rim around a white panel of recessed holes. The Buffer is a quiet grey pill whose empty slots warm towards red as it fills, and the last free slot pulses. Cream candy buttons and fat outlined type. Win: a card bounces in over a dimmed scene with rays and sparkles. Lose: calmer, no gold.',
+    knobs: { shading: 'lambert', outlines: 'none', bevel: 'on', head: 'dome', settings: 'bar' },
+    bg: 'linear-gradient(180deg, #eef6fc 0%, #d9eaf6 55%, #c9dff0 100%)',
+    roles: [['Ink (text, icons)', '#1f2a52'], ['Surface (buttons, cards)', '#fff6e6'], ['Button rim', '#e2cfa9'], ['Go / confirm', '#2fbf45'], ['Reward / win', '#ffc21a'], ['Fail / warning', '#ff3b47'], ['Background top = theme_color', '#eef6fc'], ['Background bottom = background_color', '#c9dff0']],
+    font: '<b>Fredoka</b> 500/600/700 (SIL OFL 1.1). Round and friendly, closest to “fat rounded type”. Self-hosted via <code>@fontsource/fredoka</code>, Latin subset woff2, about 25 KB a weight.',
+    car: { cream: '#f2e7d3', tyre: '#4b4f58', hub: '#dfe2e6', interior: '#cfc8bd', chassis: '#a3a8b0', light: '#fff3c4', engine: '#b4b9c0' },
+  },
+  B: {
+    name: 'Workbench',
+    note: 'Our own material accent instead of wood: painted tin trays on a dark slate workbench. Soft toon shading (3 bands) with ink outlines on the Pins only, so the Pins pop off a darker scene. Boxes are solid tinted tins with dark recessed holes. The Buffer is a black rubber mat: amber rings appear on its empty slots when 2 are left, and the last one pulses red. Teal pill buttons. Win: a gold ribbon slides across. Lose: a slate ribbon.',
+    knobs: { shading: 'toon', outlines: 'pins', bevel: 'on', head: 'pan', settings: 'sheet' },
+    bg: 'radial-gradient(120% 75% at 50% 48%, #5a7783 0%, #34505b 55%, #1f2f36 100%)',
+    roles: [['Ink (text on light)', '#13202a'], ['Surface (sheets, cards)', '#2c3f49'], ['Accent (buttons)', '#13a3c4'], ['Go / confirm', '#3ccf4e'], ['Reward / win', '#ffd60a'], ['Fail / warning', '#ff3b47'], ['Background top = theme_color', '#34505b'], ['Background bottom = background_color', '#1f2f36']],
+    font: '<b>Baloo 2</b> 600/800 (SIL OFL 1.1). Heavy and rounded, a little more grown-up. Self-hosted via <code>@fontsource/baloo-2</code>.',
+    car: { cream: '#efe2c9', tyre: '#2f3238', hub: '#c9ccd1', interior: '#b9b3a8', chassis: '#8a9099', light: '#fff3c4', engine: '#9aa0a8' },
+  },
+  C: {
+    name: 'Sticker',
+    note: 'The plan from the cartoon-look research, taken all the way: cel shading with ink outlines on everything, no bevels, flat bright colour on warm cream stripes. Boxes are flat tinted stickers on a white backing with white holes. The Buffer is a white strip with a counter badge that turns orange, then red, and shakes. Flat buttons with hard ink shadows. Win: a yellow sticker slaps on, tilted. Lose: a grey one.',
+    knobs: { shading: 'toon', outlines: 'all', bevel: 'off', head: 'dome', settings: 'bar' },
+    bg: 'repeating-linear-gradient(135deg, #fff4dc 0 18px, #ffeccb 18px 36px)',
+    roles: [['Ink (text, outlines)', '#1b1b22'], ['Surface (buttons, cards)', '#ffffff'], ['Accent (badges)', '#2f6bff'], ['Go / confirm', '#3ccf4e'], ['Reward / win', '#ffd60a'], ['Fail / warning', '#ff3b47'], ['Background = theme_color', '#fff4dc'], ['background_color', '#fff4dc']],
+    font: '<b>Lilita One</b> 400 (SIL OFL 1.1). One heavy weight, all-caps, very poster-like. Self-hosted via <code>@fontsource/lilita-one</code>. Only one weight, so body text needs a second font or uses it too.',
+    car: { cream: '#fbefd5', tyre: '#34363d', hub: '#e7e9ec', interior: '#d6d0c4', chassis: '#9ba1a9', light: '#fff6c2', engine: '#b7bcc3' },
+  },
+};
+const KNOBS = {
+  shading: [['lambert', 'Lambert (soft)'], ['toon', 'Toon (3 bands)']],
+  outlines: [['none', 'None'], ['pins', 'Pins only'], ['all', 'Everything']],
+  bevel: [['on', 'On'], ['off', 'Off']],
+  head: [['dome', 'Domed flush disc'], ['pan', 'Pan head'], ['taper', 'Old tapered']],
+  settings: [['bar', 'Own button in bar'], ['sheet', 'Settings sheet']],
+};
+const PRESETS = {
+  window: { name: 'This window (use on a real phone)', real: true },
+  s360: { name: 'Small Android · 360 × 640', w: 360, h: 640, t: 0, b: 0 },
+  i14: { name: 'iPhone 14/15 · 390 × 844', w: 390, h: 844, t: 47, b: 34, notch: true },
+  desk: { name: 'Desktop window · 1280 × 800', w: 1280, h: 800, t: 0, b: 0, desktop: true },
+};
+const S = {
+  style: STYLES[params.get('style')] ? params.get('style') : 'A',
+  device: PRESETS[params.get('device')] ? params.get('device') : (innerWidth < 700 ? 'window' : 's360'),
+  rotate: params.get('land') === '1',
+  boxes: 3, cap: 3, buf: 6, bufFill: 3,
+  banner: 'none', cb: false, mute: false, sheetOpen: false,
+};
+S.k = { ...STYLES[S.style].knobs };
+for (const key of Object.keys(KNOBS)) { const v = params.get(key); if (v && KNOBS[key].some(([k]) => k === v)) S.k[key] = v; }
+function pushUrl() {
+  const p = new URLSearchParams();
+  p.set('style', S.style); p.set('device', S.device);
+  if (S.rotate) p.set('land', '1');
+  const def = STYLES[S.style].knobs;
+  for (const key of Object.keys(KNOBS)) if (S.k[key] !== def[key]) p.set(key, S.k[key]);
+  history.replaceState(null, '', '?' + p.toString());
+}
+const ST = () => STYLES[S.style];
+const role = name => ST().roles.find(r => r[0].startsWith(name))[1];
+const hexScale = (h, k) => C3.FromHexString(h).scale(k).toHexString();
+const hexMix = (a, b, t) => C3.Lerp(C3.FromHexString(a), C3.FromHexString(b), t).toHexString();
+
+// HUD sizing constants (CSS px), from Screen layout and HUD.
+const K = { margin: 10, boxGap: 10, boxPad: 6, boxSlotMax: 46, bufGap: 5, bufPad: 6, bufSlotMax: 52, bufToBox: 0.8, pinInSlot: 0.78, rowGap: 8 };
+
+// ===================================================================
+// Babylon scene. Transparent clear: the CSS background shows through (and fills the letterbox).
+const canvas = $('c');
+const engine = new BABYLON.Engine(canvas, true, { stencil: true, antialias: true, premultipliedAlpha: false, alpha: true });
+const DPR = Math.min(2, window.devicePixelRatio || 1);
+engine.setHardwareScalingLevel(1 / DPR);
+const scene = new BABYLON.Scene(engine);
+scene.clearColor = new BABYLON.Color4(0, 0, 0, 0);
+const MODEL_LAYER = 0x1, HUD_LAYER = 0x2, FOV = 0.8;
+const modelCam = new BABYLON.FreeCamera('modelCam', new V3(0, 0, -14), scene);
+modelCam.fov = FOV; modelCam.minZ = 0.1; modelCam.inputs.clear(); modelCam.layerMask = MODEL_LAYER;
+const hudCam = new BABYLON.FreeCamera('hudCam', new V3(0, 0, -500), scene);
+hudCam.mode = BABYLON.Camera.ORTHOGRAPHIC_CAMERA; hudCam.setTarget(new V3(0, 0, 0)); hudCam.minZ = 1; hudCam.maxZ = 2000;
+hudCam.inputs.clear(); hudCam.layerMask = HUD_LAYER;
+scene.activeCameras = [modelCam, hudCam];
+const hemi = new BABYLON.HemisphericLight('h', new V3(0.2, 1, -0.4), scene);
+const sun = new BABYLON.DirectionalLight('d', new V3(-0.4, -1, 0.7), scene);
+function setLights() {
+  // Soft: bright sky, light coloured shadow side (ground colour), so shadow sides stay light.
+  hemi.intensity = 0.8; hemi.groundColor = new C3(0.62, 0.62, 0.7); hemi.specular = C3.Black();
+  sun.intensity = 0.6; sun.specular = new C3(0.9, 0.9, 0.9);
+}
+setLights();
+
+// ---- Materials: one cache per (colour, role, shading) ---------------------------------------
+const mats = {};
+function matFor(hex, kind) {
+  // kind: body (car Parts) | pin (glossy) | metal (shank) | hud (Box/Buffer objects) | flash
+  const key = hex + kind + S.k.shading;
+  if (mats[key]) return mats[key];
+  let m;
+  if (S.k.shading === 'toon' && BABYLON.CellMaterial) {
+    m = new BABYLON.CellMaterial(key, scene);
+    m.diffuseColor = C3.FromHexString(hex).scale(kind === 'hud' ? 1.15 : 1.08); m.computeHighLevel = true;
+  } else {
+    m = new BABYLON.StandardMaterial(key, scene);
+    m.diffuseColor = C3.FromHexString(hex);
+    const gloss = kind === 'pin' || kind === 'metal';
+    m.specularColor = gloss ? new C3(0.55, 0.55, 0.55) : new C3(0.04, 0.04, 0.04);
+    m.specularPower = gloss ? 48 : 16;
+    m.emissiveColor = m.diffuseColor.scale(kind === 'hud' ? 0.3 : kind === 'pin' ? 0.18 : 0.12);
+  }
+  mats[key] = m; return m;
+}
+const INK = () => C3.FromHexString(S.style === 'C' ? '#1b1b22' : '#1f2329');
+function outlineFor(m, what, w) {
+  // what: body | pin | hud
+  const on = S.k.outlines === 'all' || (S.k.outlines === 'pins' && what === 'pin');
+  m.renderOutline = on; if (on) { m.outlineWidth = w; m.outlineColor = INK(); }
+}
+
+// ---- Textures drawn in-house: head marks, holes, grommets, rings ------------------------------
+function drawGlyph(ctx, kind, cx, cy, r) {
+  ctx.beginPath();
+  const poly = pts => { pts.forEach(([x, y], i) => (i ? ctx.lineTo(cx + x * r, cy + y * r) : ctx.moveTo(cx + x * r, cy + y * r))); ctx.closePath(); ctx.fill(); };
+  const star = (n, ri) => poly(Array.from({ length: n * 2 }, (_, i) => { const a = -Math.PI / 2 + i * Math.PI / n, rr = i % 2 ? ri : 1; return [Math.cos(a) * rr, Math.sin(a) * rr]; }));
+  switch (kind) {
+    case 'phillips': { const t = 0.17, a = 0.78; poly([[-t, -a], [t, -a], [t, -t], [a, -t], [a, t], [t, t], [t, a], [-t, a], [-t, t], [-a, t], [-a, -t], [-t, -t]]); break; }
+    case 'slot': poly([[-0.85, -0.16], [0.85, -0.16], [0.85, 0.16], [-0.85, 0.16]]); break;
+    case 'hexsock': poly(Array.from({ length: 6 }, (_, i) => { const a = i * Math.PI / 3; return [Math.cos(a) * 0.6, Math.sin(a) * 0.6]; })); break;
+    case 'torx': star(6, 0.62); break;
+    case 'robertson': poly([[-0.42, -0.42], [0.42, -0.42], [0.42, 0.42], [-0.42, 0.42]]); break;
+    case 'tri': poly([[0, -0.62], [0.56, 0.38], [-0.56, 0.38]]); break;
+  }
+}
+const texMats = {};
+function texMat(key, draw, size = 128) {
+  if (texMats[key]) return texMats[key];
+  const t = new BABYLON.DynamicTexture('t' + key, { width: size, height: size }, scene, true);
+  const ctx = t.getContext(); ctx.clearRect(0, 0, size, size);
+  draw(ctx, size); t.hasAlpha = true; t.update();
+  const m = new BABYLON.StandardMaterial('m' + key, scene);
+  m.diffuseTexture = t; m.useAlphaFromDiffuseTexture = true; m.disableLighting = true;
+  m.emissiveColor = C3.Black(); m.specularColor = C3.Black(); m.backFaceCulling = false; m.zOffset = -2;
+  texMats[key] = m; return m;
+}
+// A recess with a visible inner wall: the wall tone fills the shape, the lighter floor is the same
+// shape shifted down, kept inside it (source-atop). So the upper edge reads as a shadowed wall.
+function markMat(kind, hex) {
+  return texMat('mark' + kind + hex, (ctx, n) => {
+    ctx.fillStyle = hexScale(hex, 0.3); drawGlyph(ctx, kind, n / 2, n / 2, n * 0.39);
+    ctx.globalCompositeOperation = 'source-atop';
+    ctx.fillStyle = hexScale(hex, 0.5); drawGlyph(ctx, kind, n / 2, n / 2 + n * 0.06, n * 0.39);
+    ctx.globalCompositeOperation = 'source-over';
+  });
+}
+function innerShadowDisc(ctx, cx, cy, r, base, alpha, blur = 0.35, off = 0.22) {
+  ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fillStyle = base; ctx.fill(); ctx.clip();
+  ctx.shadowColor = `rgba(0,0,0,${alpha})`; ctx.shadowBlur = r * blur; ctx.shadowOffsetY = r * off;
+  ctx.beginPath(); ctx.rect(cx - 3 * r, cy - 3 * r, 6 * r, 6 * r); ctx.arc(cx, cy, r, 0, Math.PI * 2, true); ctx.fillStyle = '#000'; ctx.fill();
+  ctx.restore();
+}
+function faintGlyph(ctx, n, glyph, ink) { if (!glyph) return; ctx.fillStyle = ink; drawGlyph(ctx, glyph, n / 2, n / 2, n * 0.3); }
+// Empty Box hole (per style). glyph: the colour-blind drive shown faintly, or null.
+function holeMat(boxHex, glyph) {
+  return texMat(`hole${S.style}${boxHex}${glyph}`, (ctx, n) => {
+    const c = n / 2, r = n * 0.47;
+    if (S.style === 'A') { innerShadowDisc(ctx, c, c, r, '#b7bbc4', 0.5); faintGlyph(ctx, n, glyph, '#0000002a'); }
+    else if (S.style === 'B') {
+      ctx.beginPath(); ctx.arc(c, c, r, 0, 7); ctx.fillStyle = hexMix(boxHex, '#ffffff', 0.35); ctx.fill();          // lighter lip
+      innerShadowDisc(ctx, c, c, r * 0.86, hexScale(boxHex, 0.42), 0.6); faintGlyph(ctx, n, glyph, '#00000040');
+    } else {
+      ctx.beginPath(); ctx.arc(c, c, r * 0.92, 0, 7); ctx.fillStyle = '#fff'; ctx.fill();
+      ctx.lineWidth = n * 0.07; ctx.strokeStyle = '#1b1b22'; ctx.stroke(); faintGlyph(ctx, n, glyph, '#1b1b2230');
+    }
+  });
+}
+// Empty Buffer slot. warm 0..1 tints it towards the fail colour (style A); ring: amber ring (style B).
+function bufSlotMat(warm, ring) {
+  const w = Math.round(warm * 10) / 10;
+  return texMat(`buf${S.style}${w}${ring}`, (ctx, n) => {
+    const c = n / 2, r = n * 0.47;
+    if (S.style === 'A') {
+      ctx.beginPath(); ctx.arc(c, c, r, 0, 7); ctx.fillStyle = hexMix('#d3d8e0', '#ff8a8f', w); ctx.fill();             // grommet ring
+      innerShadowDisc(ctx, c, c, r * 0.72, hexMix('#a2a8b3', '#d9626a', w), 0.45);
+    } else if (S.style === 'B') {
+      if (ring) { ctx.beginPath(); ctx.arc(c, c, r, 0, 7); ctx.fillStyle = '#ffb020'; ctx.fill(); }
+      innerShadowDisc(ctx, c, c, ring ? r * 0.8 : r * 0.9, '#0f1a1f', 0.8);
+    } else {
+      ctx.beginPath(); ctx.arc(c, c, r * 0.9, 0, 7); ctx.fillStyle = '#f2f2f4'; ctx.fill();
+      ctx.setLineDash([n * 0.09, n * 0.07]); ctx.lineWidth = n * 0.06; ctx.strokeStyle = '#1b1b22'; ctx.stroke();
+    }
+  });
+}
+function ringMat(hex) {
+  return texMat('ring' + hex, (ctx, n) => { ctx.beginPath(); ctx.arc(n / 2, n / 2, n * 0.44, 0, 7); ctx.lineWidth = n * 0.09; ctx.strokeStyle = hex; ctx.stroke(); });
+}
+
+// ---- Geometry: rounded, bevelled boxes (convex) and lathed cylinders -----------------------------
+// Profile is a rounded rectangle W × D (corner radius r) in XZ, extruded along Y over H, with a
+// quarter-round bevel b on the top edge (and the bottom edge if both).
+function roundedBoxMesh(name, W, D, H, r, b, both = true) {
+  r = Math.max(0.0005, Math.min(r, W / 2 - 1e-4, D / 2 - 1e-4)); b = Math.max(0, Math.min(b, r, both ? H / 2 : H));
+  const n = 5, k = b > 0 ? 4 : 0;
+  const rings = [];
+  if (both && k) for (let i = 0; i <= k; i++) { const t = i / k * Math.PI / 2; rings.push({ y: -H / 2 + b - b * Math.cos(t), inset: b - b * Math.sin(t) }); }
+  else rings.push({ y: -H / 2, inset: 0 });
+  if (k) for (let i = 0; i <= k; i++) { const t = Math.PI / 2 - i / k * Math.PI / 2; rings.push({ y: H / 2 - b + b * Math.cos(t), inset: b - b * Math.sin(t) }); }
+  else rings.push({ y: H / 2, inset: 0 });
+  const corners = [[1, 1, 0], [-1, 1, 0.5], [-1, -1, 1], [1, -1, 1.5]];
+  const ringPts = (y, inset) => {
+    const pts = [], rr = Math.max(1e-4, r - inset);
+    for (const [sx, sz, a0] of corners) for (let j = 0; j <= n; j++) {
+      const a = (a0 + j / n * 0.5) * Math.PI;
+      pts.push(sx * (W / 2 - r) + Math.cos(a) * rr, y, sz * (D / 2 - r) + Math.sin(a) * rr);
+    }
+    return pts;
+  };
+  const pos = [], idx = [], M = corners.length * (n + 1);
+  rings.forEach(R => pos.push(...ringPts(R.y, R.inset)));
+  for (let j = 0; j < rings.length - 1; j++) for (let i = 0; i < M; i++) {
+    const a = j * M + i, b2 = j * M + (i + 1) % M, c = (j + 1) * M + i, d = (j + 1) * M + (i + 1) % M;
+    idx.push(a, c, b2, b2, c, d);
+  }
+  const cap = (R, y) => { const base = pos.length / 3; pos.push(...ringPts(R.y, R.inset)); const ctr = pos.length / 3; pos.push(0, y, 0); for (let i = 0; i < M; i++) idx.push(ctr, base + i, base + (i + 1) % M); };
+  cap(rings[0], -H / 2); cap(rings[rings.length - 1], H / 2);
+  // Convex: make every triangle face away from the centre, so normals point out.
+  for (let t = 0; t < idx.length; t += 3) {
+    const P = i => new V3(pos[3 * i], pos[3 * i + 1], pos[3 * i + 2]);
+    const A = P(idx[t]), B = P(idx[t + 1]), Cc = P(idx[t + 2]);
+    const nrm = V3.Cross(B.subtract(A), Cc.subtract(A)), ctr = A.add(B).add(Cc).scale(1 / 3);
+    if (V3.Dot(nrm, ctr) > 0) { const tmp = idx[t + 1]; idx[t + 1] = idx[t + 2]; idx[t + 2] = tmp; }
+  }
+  const normals = []; BABYLON.VertexData.ComputeNormals(pos, idx, normals);
+  // Babylon's winding convention: check the top-centre normal and flip everything if it points in.
+  const topC = pos.length / 3 - 1;
+  if (normals[3 * topC + 1] < 0) { for (let t = 0; t < idx.length; t += 3) { const tmp = idx[t + 1]; idx[t + 1] = idx[t + 2]; idx[t + 2] = tmp; } normals.length = 0; BABYLON.VertexData.ComputeNormals(pos, idx, normals); }
+  const vd = new BABYLON.VertexData(); vd.positions = pos; vd.indices = idx; vd.normals = normals;
+  const mesh = new BABYLON.Mesh(name, scene); vd.applyToMesh(mesh); return mesh;
+}
+function latheMesh(name, prof, tess = 32) {
+  return BABYLON.MeshBuilder.CreateLathe(name, { shape: prof.map(([x, y]) => new V3(x, y, 0)), tessellation: tess, sideOrientation: BABYLON.Mesh.DOUBLESIDE }, scene);
+}
+function arc(cx, cy, r, a0, a1, steps = 4) { return Array.from({ length: steps + 1 }, (_, i) => { const a = a0 + (a1 - a0) * i / steps; return [cx + r * Math.cos(a), cy + r * Math.sin(a)]; }); }
+function roundedCylProfile(R, h, b) {
+  return [[0, -h / 2], ...arc(R - b, -h / 2 + b, b, -Math.PI / 2, 0), ...arc(R - b, h / 2 - b, b, 0, Math.PI / 2), [0, h / 2]];
+}
+
+// ---- Pin templates. Every head is the same diameter (PIN_D) as before, so tap targets don't change.
+const PIN_D = 0.24, R = PIN_D / 2;
+const pinTemplates = {};
+function pinTemplate(kind) {
+  if (pinTemplates[kind]) return pinTemplates[kind];
+  let prof, top;
+  if (kind === 'dome') { prof = [[0, 0], [R * 0.97, 0], ...arc(R * 0.86, 0.014, R * 0.14, -Math.PI / 2, 0, 3).slice(1), ...arc(R * 0.86, 0.022, R * 0.14, 0, Math.PI / 2, 3), [R * 0.5, 0.052], [0, 0.056]]; top = 0.056; }
+  else if (kind === 'pan') { prof = [[0, 0], [R, 0], [R, 0.03], ...arc(R * 0.62, 0.03, R * 0.38, 0, Math.PI / 2, 5), [0, 0.03 + R * 0.38]]; top = 0.03 + R * 0.38; }
+  else { prof = [[0, 0], [0.06, 0], [R, 0.22], [0, 0.22]]; top = 0.22; }
+  const head = latheMesh('pinHead' + kind, prof, kind === 'taper' ? 14 : 28); head.setEnabled(false);
+  // Threaded shank, shown only while the Pin pops out (reads as unscrewing).
+  const sp = [[0, 0.001]]; for (let y = 0, i = 0; y > -0.26; y -= 0.022, i++) sp.push([i % 2 ? 0.05 : 0.036, y]);
+  sp.push([0.02, -0.28], [0, -0.29]);
+  const shank = latheMesh('pinShank', sp, 16); shank.setEnabled(false);
+  return (pinTemplates[kind] = { head, shank, top });
+}
+function markKind(ci, where) { if (where === 'slot') return null; return S.cb ? DRIVES[ci % DRIVES.length] : 'phillips'; }
+function makePin(ci, layer) {
+  const T = pinTemplate(S.k.head), hex = PALETTE[ci];
+  const node = new BABYLON.TransformNode('pin', scene);
+  const head = T.head.clone('ph'); head.setEnabled(true); head.parent = node; head.layerMask = layer; head.material = matFor(hex, 'pin');
+  outlineFor(head, 'pin', layer === HUD_LAYER ? 0.012 : 0.012);
+  const shank = T.shank.clone('ps'); shank.parent = node; shank.layerMask = layer; shank.material = matFor('#c4c9d1', 'metal'); shank.setEnabled(false); shank.isPickable = false;
+  const d = BABYLON.MeshBuilder.CreateDisc('mark', { radius: R * 0.72, tessellation: 24 }, scene);
+  d.rotation.x = Math.PI / 2; d.position.y = T.top + 0.002; d.parent = node; d.layerMask = layer; d.isPickable = false;
+  d.material = markMat(markKind(ci, 'pin'), hex);
+  node.metadata = { head, shank, mark: d, ci };
+  head.metadata = { pinNode: node };
+  return node;
+}
+
+// ===================================================================
+// The car (Parts and Sockets from the earlier prototypes; 5 colours × 6, seeded deal).
+const modelRoot = new BABYLON.TransformNode('modelRoot', scene);
+modelRoot.rotationQuaternion = BABYLON.Quaternion.Identity();
+let carNode = null, CAR_R = 2.6, carParts = [];
+function buildCar() {
+  if (carNode) carNode.dispose(false, false);
+  carNode = new BABYLON.TransformNode('car', scene); carNode.parent = modelRoot; carNode.position.y = -1.05;
+  carParts = [];
+  const C = ST().car;
+  const UP = [0, 1, 0], L = [0, 0, -1], Rt = [0, 0, 1], BACK = [-1, 0, 0];
+  const box = (s, p, c) => ({ k: 'box', s, p, c });
+  const cylZ = (d, h, p, c) => ({ k: 'cyl', d, h, p, c, r: [Math.PI / 2, 0, 0] });
+  const cylX = (d, h, p, c) => ({ k: 'cyl', d, h, p, c, r: [0, 0, Math.PI / 2] });
+  const wheel = (x, z) => [cylZ(0.9, 0.3, [x, 0.45, z], C.tyre), cylZ(0.45, 0.32, [x, 0.45, z], C.hub)];
+  const parts = [
+    { shapes: wheel(1.3, -0.98), sockets: [{ p: [1.3, 0.45, -1.14], n: L }] },
+    { shapes: wheel(1.3, 0.98), sockets: [{ p: [1.3, 0.45, 1.14], n: Rt }] },
+    { shapes: wheel(-1.3, -0.98), sockets: [{ p: [-1.3, 0.45, -1.14], n: L }] },
+    { shapes: wheel(-1.3, 0.98), sockets: [{ p: [-1.3, 0.45, 1.14], n: Rt }] },
+    { shapes: [box([1.25, 0.12, 1.7], [1.35, 1.18, 0], C.cream)], sockets: [{ p: [1.65, 1.24, 0.4], n: UP }, { p: [1.05, 1.24, -0.4], n: UP }] },
+    { shapes: [box([2.3, 0.12, 1.75], [-0.35, 1.98, 0], C.cream)], sockets: [{ p: [0.25, 2.04, 0.4], n: UP }, { p: [-0.95, 2.04, -0.4], n: UP }] },
+    { shapes: [box([1.7, 0.65, 0.1], [-0.3, 0.95, -0.86], C.cream)], sockets: [{ p: [-0.75, 1.02, -0.91], n: L }, { p: [0.15, 1.02, -0.91], n: L }] },
+    { shapes: [box([1.7, 0.65, 0.1], [-0.3, 0.95, 0.86], C.cream)], sockets: [{ p: [-0.75, 1.02, 0.91], n: Rt }, { p: [0.15, 1.02, 0.91], n: Rt }] },
+    { shapes: [box([0.1, 1.05, 1.7], [-1.55, 1.4, 0], C.cream)], sockets: [{ p: [-1.6, 1.8, 0.68], n: BACK }, { p: [-1.6, 1.0, -0.68], n: BACK }] },
+    { shapes: [cylX(0.8, 0.2, [-1.7, 1.4, 0], C.tyre), cylX(0.4, 0.22, [-1.71, 1.4, 0], C.hub)], sockets: [{ p: [-1.82, 1.4, 0.13], n: BACK }, { p: [-1.82, 1.4, -0.13], n: BACK }] },
+    { shapes: [cylZ(0.14, 1.7, [1.3, 0.45, 0], C.chassis)], sockets: [{ p: [1.3, 0.45, -0.8], n: L }, { p: [1.3, 0.45, 0.8], n: Rt }] },
+    { shapes: [cylZ(0.14, 1.7, [-1.3, 0.45, 0], C.chassis)], sockets: [{ p: [-1.3, 0.45, -0.8], n: L }, { p: [-1.3, 0.45, 0.8], n: Rt }] },
+    { shapes: [box([0.9, 0.4, 1.1], [1.35, 0.8, 0], C.engine)], sockets: [{ p: [1.1, 1.0, -0.3], n: UP }, { p: [1.35, 1.0, 0.3], n: UP }, { p: [1.6, 1.0, -0.1], n: UP }] },
+    { shapes: [box([0.5, 0.15, 0.5], [0.1, 0.75, -0.4], C.interior), box([0.12, 0.6, 0.5], [-0.15, 1.0, -0.4], C.interior)], sockets: [{ p: [0.25, 0.77, -0.65], n: L }, { p: [-0.15, 1.0, -0.65], n: L }] },
+    { shapes: [box([0.5, 0.15, 0.5], [0.1, 0.75, 0.4], C.interior), box([0.12, 0.6, 0.5], [-0.15, 1.0, 0.4], C.interior)], sockets: [{ p: [0.25, 0.77, 0.65], n: Rt }, { p: [-0.15, 1.0, 0.65], n: Rt }] },
+    { shapes: [{ k: 'torus', d: 0.4, t: 0.05, p: [0.5, 1.35, -0.4], c: C.tyre, r: [0, 0, 0.5] }, { k: 'cyl', d: 0.06, h: 0.45, p: [0.62, 1.15, -0.4], c: C.tyre, r: [0, 0, 0.6] }], sockets: [{ p: [0.5, 1.37, -0.4], n: UP }] },
+    { shapes: [box([0.5, 0.5, 1.45], [-1.15, 0.85, 0], C.interior)], sockets: [{ p: [-1.4, 0.95, 0.35], n: BACK }, { p: [-1.4, 0.95, -0.35], n: BACK }] },
+    { shapes: [box([4.0, 0.3, 1.6], [0, 0.45, 0], C.chassis), box([0.15, 0.55, 1.6], [1.95, 0.85, 0], C.cream),
+      ...[[0.75, -0.8], [0.75, 0.8], [-1.45, -0.8], [-1.45, 0.8]].map(([x, z]) => box([0.12, 0.75, 0.12], [x, 1.55, z], C.cream))], sockets: [] },
+    { shapes: [box([0.25, 0.3, 1.9], [2.1, 0.5, 0], C.chassis)], sockets: [] },
+    { shapes: [box([0.25, 0.3, 1.9], [-2.1, 0.5, 0], C.chassis)], sockets: [] },
+    { shapes: [cylX(0.3, 0.08, [2.04, 0.95, -0.55], C.light)], sockets: [] },
+    { shapes: [cylX(0.3, 0.08, [2.04, 0.95, 0.55], C.light)], sockets: [] },
+  ];
+  let seed = 7; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const deck = []; for (let k = 0; k < 5; k++) for (let j = 0; j < 6; j++) deck.push(k);
+  for (let i = deck.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [deck[i], deck[j]] = [deck[j], deck[i]]; }
+  let pi = 0;
+  const up = new V3(0, 1, 0), bevel = S.k.bevel === 'on';
+  parts.forEach((part, partIdx) => {
+    const meshes = [];
+    for (const s of part.shapes) {
+      let m;
+      if (s.k === 'box') {
+        const bb = Math.min(0.07, 0.45 * Math.min(...s.s));
+        m = bevel ? roundedBoxMesh('s', s.s[0], s.s[2], s.s[1], bb, bb, true) : BABYLON.MeshBuilder.CreateBox('s', { width: s.s[0], height: s.s[1], depth: s.s[2] }, scene);
+      } else if (s.k === 'cyl') {
+        const bb = Math.min(0.06, s.d * 0.2, s.h * 0.45);
+        m = bevel ? latheMesh('s', roundedCylProfile(s.d / 2, s.h, bb), 32) : BABYLON.MeshBuilder.CreateCylinder('s', { diameter: s.d, height: s.h, tessellation: 32 }, scene);
+      } else m = BABYLON.MeshBuilder.CreateTorus('s', { diameter: s.d, thickness: s.t, tessellation: 32 }, scene);
+      m.position.set(...s.p); if (s.r) m.rotation.set(...s.r);
+      m.material = matFor(s.c, 'body'); m.parent = carNode; outlineFor(m, 'body', 0.014); m.layerMask = MODEL_LAYER;
+      m.metadata = { part: partIdx, hex: s.c }; meshes.push(m);
+    }
+    carParts.push(meshes);
+    for (const so of part.sockets) {
+      const node = makePin(deck[pi++], MODEL_LAYER); node.parent = carNode;
+      node.position.set(...so.p);
+      const n = new V3(...so.n), d = V3.Dot(up, n);
+      node.rotationQuaternion = d > 0.9999 ? BABYLON.Quaternion.Identity() : BABYLON.Quaternion.RotationAxis(V3.Cross(up, n).normalize(), Math.acos(d));
+      node.metadata.base = node.position.clone(); node.metadata.n = n;
+    }
+  });
+  let r = 0;
+  carNode.getChildMeshes().forEach(m => { if (!m.isEnabled()) return; m.computeWorldMatrix(true); m.getBoundingInfo().boundingBox.vectorsWorld.forEach(v => { r = Math.max(r, v.length()); }); });
+  CAR_R = r;
+}
+const START_ROT = BABYLON.Quaternion.RotationYawPitchRoll(-0.65, 0.32, 0);
+modelRoot.rotationQuaternion.copyFrom(START_ROT);
+
+// ===================================================================
+// Layout (variant A from Screen layout and HUD), with the player-facing right side of the bar:
+// [Undo (dev)] ........ [colour-blind or settings] [mute] [Restart]
+function boxSlotGrid(cap) { const cols = Math.ceil(cap / 2); return { cols, rows: cap > 1 ? 2 : 1 }; }
+function boxSlotCentre(s, cap, x, y, slot) {
+  const { cols } = boxSlotGrid(cap);
+  const row = s < cols ? 0 : 1, inRow = row === 0 ? cols : cap - cols, i = row === 0 ? s : s - cols;
+  const rowX = x + K.boxPad + (cols - inRow) * slot / 2;
+  return { cx: rowX + slot * (i + 0.5), cy: y + K.boxPad + slot * (row + 0.5) };
+}
+function sizeBoxRow(avail, n, cap) {
+  const { cols, rows } = boxSlotGrid(cap);
+  const boxW = Math.min((avail - K.boxGap * (n - 1)) / n, cols * K.boxSlotMax + 2 * K.boxPad);
+  const slot = (boxW - 2 * K.boxPad) / cols;
+  return { boxW, slot, boxH: rows * slot + 2 * K.boxPad, rowW: n * boxW + (n - 1) * K.boxGap };
+}
+function sizeBuffer(avail, b, boxSlot) {
+  const slot = Math.min(K.bufSlotMax, boxSlot * K.bufToBox, (avail - 2 * K.bufPad - K.bufGap * (b - 1)) / b);
+  return { slot, trayW: b * slot + (b - 1) * K.bufGap + 2 * K.bufPad, trayH: slot + 2 * K.bufPad };
+}
+function layout(W, H, ins, lv) {
+  const M = K.margin;
+  const safe = { x: ins.l, y: ins.t, w: W - ins.l - ins.r, h: H - ins.t - ins.b };
+  const out = { W, H, ins, safe, buttons: [] };
+  let col = { ...safe };
+  const centre = (x, w, inner) => x + (w - inner) / 2;
+  if (W > H) { const cw = Math.min(safe.w, Math.round(safe.h * 9 / 16)); col = { x: centre(safe.x, safe.w, cw), y: safe.y, w: cw, h: safe.h }; }
+  out.col = col;
+  const bx = sizeBoxRow(col.w - 2 * M, lv.boxes, lv.cap), bf = sizeBuffer(col.w - 2 * M, lv.buf, bx.slot);
+  let y = col.y + M;
+  out.boxes = { x: centre(col.x, col.w, bx.rowW), y, w: bx.rowW, h: bx.boxH, ...bx }; y += bx.boxH + K.rowGap;
+  out.buffer = { x: centre(col.x, col.w, bf.trayW), y, w: bf.trayW, h: bf.trayH, ...bf }; y += bf.trayH + M;
+  const barH = 48, by = col.y + col.h - M - barH, g = 6;
+  out.buttons.push({ id: 'undo', x: col.x + M, y: by, w: 104, h: barH, dev: true });
+  let rx = col.x + col.w - M - 112;
+  out.buttons.push({ id: 'restart', x: rx, y: by, w: 112, h: barH });
+  rx -= g + 48; out.buttons.push({ id: 'mute', x: rx, y: by, w: 48, h: barH });
+  rx -= g + 48; out.buttons.push({ id: S.k.settings === 'bar' ? 'cb' : 'settings', x: rx, y: by, w: 48, h: barH });
+  out.model = { x: col.x, y, w: col.w, h: by - M - y };
+  return out;
+}
+
+// ===================================================================
+// HUD meshes, rebuilt on every apply. 1 world unit = 1 CSS px, origin top-left, y up.
+const hudRoot = new BABYLON.TransformNode('hud', scene);
+let pulses = [], shakeMeshes = [];
+function clearHud() { hudRoot.getChildren().slice().forEach(c => c.dispose()); pulses = []; shakeMeshes = []; }
+// A slab with its back at zBack and its front face towards the camera (smaller z).
+function hudSlab(x, y, w, h, depth, zBack, r, b, hex, outlineW = 1.5) {
+  const m = roundedBoxMesh('slab', w, h, depth, r, S.k.bevel === 'on' ? b : 0, false);
+  m.rotation.x = -Math.PI / 2;
+  m.position.set(x + w / 2, -(y + h / 2), zBack - depth / 2);
+  m.material = matFor(hex, 'hud'); m.parent = hudRoot; m.layerMask = HUD_LAYER; outlineFor(m, 'hud', outlineW);
+  return m;
+}
+function hudDisc(cx, cy, d, z, material) {
+  const m = BABYLON.MeshBuilder.CreateDisc('hd', { radius: d / 2, tessellation: 32 }, scene);
+  m.position.set(cx, -cy, z); m.material = material; m.parent = hudRoot; m.layerMask = HUD_LAYER; m.isPickable = false;
+  return m;
+}
+function hudPin(cx, cy, px, ci, z) {
+  const node = makePin(ci, HUD_LAYER); node.parent = hudRoot;
+  node.scaling.setAll(px / PIN_D); node.rotation.set(-Math.PI / 2 + 0.38, 0, 0);
+  node.position.set(cx, -cy - px * 0.06, z);
+  return node;
+}
+function buildHud() {
+  clearHud();
+  const { boxes, buffer } = LO;
+  const fillBoxes = Array.from({ length: S.boxes }, (_, i) => Math.min([1, 2, 0][i % 3], S.cap - 1));
+  for (let i = 0; i < S.boxes; i++) {
+    const hex = PALETTE[i % PALETTE.length];
+    const x = boxes.x + i * (boxes.boxW + K.boxGap), y = boxes.y, w = boxes.boxW, h = boxes.boxH;
+    let holeZ, holeD = boxes.slot * 0.84;
+    if (S.style === 'A') {        // thick tinted rim, near-white inset panel, neutral holes
+      hudSlab(x, y, w, h, 16, 0, 20, 6, hexMix(hex, '#ffffff', 0.06));
+      hudSlab(x + 5, y + 5, w - 10, h - 10, 3, -16, 15, 2, '#f7f5f0');
+      holeZ = -19.5; holeD = boxes.slot * 0.82;
+    } else if (S.style === 'B') { // a solid painted tin with dark recessed holes
+      hudSlab(x, y, w, h, 14, 0, 12, 3, hexScale(hex, 0.92));
+      holeZ = -14.5; holeD = boxes.slot * 0.9;
+    } else {                      // flat sticker on a white backing
+      hudSlab(x - 3, y - 3, w + 6, h + 6, 2, 0, 18, 0, '#ffffff', 2.5);
+      hudSlab(x + 2, y + 2, w - 4, h - 4, 3, -2, 14, 0, hex, 0);
+      holeZ = -5.5;
+    }
+    for (let s = 0; s < S.cap; s++) {
+      const { cx, cy } = boxSlotCentre(s, S.cap, x, y, boxes.slot);
+      hudDisc(cx, cy, holeD, holeZ, holeMat(hex, S.cb ? DRIVES[i % DRIVES.length] : null));
+      if (s < fillBoxes[i]) hudPin(cx, cy, boxes.slot * K.pinInSlot, i, holeZ - 1);
+    }
+  }
+  // Buffer
+  const fill = Math.min(S.bufFill, S.buf - 1), free = S.buf - fill, warm = fill / Math.max(1, S.buf - 1);
+  let tray, slotZ;
+  if (S.style === 'A') { tray = hudSlab(buffer.x, buffer.y, buffer.trayW, buffer.trayH, 10, 0, buffer.trayH / 2, 4, '#e6eaf0'); slotZ = -10.5; }
+  else if (S.style === 'B') { tray = hudSlab(buffer.x, buffer.y, buffer.trayW, buffer.trayH, 8, 0, 10, 3, '#1b272d'); slotZ = -8.5; }
+  else { tray = hudSlab(buffer.x, buffer.y, buffer.trayW, buffer.trayH, 3, 0, 12, 0, '#ffffff', 2.5); slotZ = -3.5; shakeMeshes.push(tray); }
+  for (let s = 0; s < S.buf; s++) {
+    const cx = buffer.x + K.bufPad + buffer.slot * (s + 0.5) + K.bufGap * s, cy = buffer.y + buffer.trayH / 2;
+    const isLastFree = free === 1 && s === fill;
+    if (s < fill) {
+      hudDisc(cx, cy, buffer.slot * 0.9, slotZ, bufSlotMat(0, false));
+      hudPin(cx, cy, buffer.slot * K.pinInSlot, (S.boxes + s) % PALETTE.length, slotZ - 1);
+    } else {
+      const d = hudDisc(cx, cy, buffer.slot * 0.9, slotZ, bufSlotMat(S.style === 'A' ? warm * warm : 0, S.style === 'B' && free <= 2));
+      if (S.style === 'C') shakeMeshes.push(d);
+      if (isLastFree && S.style !== 'C') {
+        const ring = hudDisc(cx, cy, buffer.slot * 1.0, slotZ - 0.5, ringMat('#ff3b47').clone('pulse')); ring.material.alpha = 0;
+        pulses.push(ring);
+      }
+    }
+  }
+  if (S.style === 'C' && free === 1) shakeT0 = performance.now();
+}
+let shakeT0 = -1e9;
+
+// ===================================================================
+// DOM chrome: buttons, Buffer badge, settings sheet, banners. Icons drawn in-house (simple shapes).
+const ICON = {
+  restart: '<path d="M19.5 12a7.5 7.5 0 1 1-2.4-5.5" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/><path d="M20.5 3.5v6.5h-6.5z" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>',
+  undo: '<path d="M5 9.5h9.5a5.5 5.5 0 0 1 0 11H10" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/><path d="M9.5 4 3.5 9.5 9.5 15z" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>',
+  soundOn: '<path d="M3 9h4l6-5v16l-6-5H3z" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19.3 5.7a9 9 0 0 1 0 12.6" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/>',
+  soundOff: '<path d="M3 9h4l6-5v16l-6-5H3z" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M16 9l6 6M22 9l-6 6" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"/>',
+  cb: '<circle cx="12" cy="12" r="9.5" fill="currentColor"/><path d="M12 6.8l4.5 2.6v5.2L12 17.2l-4.5-2.6V9.4z" fill="var(--cbHole, #fff)"/>',
+  settings: '<path d="M4 7.5h16M4 16.5h16" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><circle cx="9" cy="7.5" r="3.3" fill="currentColor"/><circle cx="15" cy="16.5" r="3.3" fill="currentColor"/>',
+};
+const svg = name => `<svg viewBox="0 0 24 24">${ICON[name]}</svg>`;
+function buttonHtml(b) {
+  switch (b.id) {
+    case 'undo': return svg('undo') + '<span>Undo</span><span class="devtag">DEV</span>';
+    case 'restart': return svg('restart') + '<span>Restart</span>';
+    case 'mute': return svg(S.mute ? 'soundOff' : 'soundOn');
+    case 'cb': return svg('cb') + (S.cb ? '<span class="badge">ON</span>' : '');
+    case 'settings': return svg('settings');
+  }
+}
+const TITLES = { undo: 'Undo (debug tool)', restart: 'Restart level', mute: 'Sound on/off', cb: 'Screw shapes (colour-blind setting)', settings: 'Settings' };
+function el(cls, r, html = '', style = '') {
+  const d = document.createElement('div'); d.className = cls;
+  d.style.cssText = `left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px;${style}`;
+  d.innerHTML = html; return d;
+}
+function buildOverlay(scr) {
+  const ov = $('overlay'); ov.innerHTML = '';
+  if (!scr.real && scr.P.notch && !S.rotate) {
+    ov.appendChild(el('notch', { x: scr.W / 2 - 80, y: 0, w: 160, h: 30 }));
+    ov.appendChild(el('homebar', { x: scr.W / 2 - 68, y: scr.H - 13, w: 136, h: 5 }));
+  }
+  const tag = document.createElement('div'); tag.id = 'tag'; tag.textContent = 'PROTOTYPE · throwaway';
+  tag.style.cssText = `left:${LO.col.x + 12}px;top:${LO.model.y + 4}px;color:${S.style === 'B' ? '#fff' : '#000'}`; ov.appendChild(tag);
+  LO.buttons.forEach(b => {
+    const btn = document.createElement('button');
+    btn.className = 'gbtn' + (b.dev ? ' dev' : '');
+    btn.style.cssText = `position:absolute;left:${b.x}px;top:${b.y}px;width:${b.w}px;height:${b.h}px;--cbHole:${S.style === 'B' ? 'var(--accent)' : S.style === 'C' ? '#fff' : 'var(--surface)'}`;
+    btn.innerHTML = buttonHtml(b); btn.title = TITLES[b.id];
+    btn.onclick = () => {
+      if (b.id === 'mute') S.mute = !S.mute;
+      else if (b.id === 'cb') S.cb = !S.cb;
+      else if (b.id === 'settings') S.sheetOpen = !S.sheetOpen;
+      else return;
+      apply(b.id === 'cb');
+    };
+    ov.appendChild(btn);
+  });
+  if (S.k.settings === 'sheet' && S.sheetOpen) {
+    const gb = LO.buttons.find(b => b.id === 'settings'), w = 230;
+    const x = Math.min(gb.x, LO.col.x + LO.col.w - K.margin - w);
+    const sh = el('sheet', { x, y: gb.y - 104, w, h: 94 },
+      `<label data-k="mute"><span>Sound</span><span class="sw ${S.mute ? '' : 'on'}"></span></label>
+       <label data-k="cb"><span>Screw shapes<br><small style="opacity:.7;font-size:11px">colour-blind help</small></span><span class="sw ${S.cb ? 'on' : ''}"></span></label>`);
+    sh.querySelectorAll('label').forEach(l => (l.onclick = () => { if (l.dataset.k === 'mute') S.mute = !S.mute; else S.cb = !S.cb; apply(l.dataset.k === 'cb'); }));
+    ov.appendChild(sh);
+  }
+  // Buffer counter badge (style C only; CSS hides it elsewhere).
+  const fill = Math.min(S.bufFill, S.buf - 1), free = S.buf - fill;
+  const bb = el('bufBadge' + (free === 1 ? ' last' : free <= 2 ? ' warn' : ''), { x: LO.buffer.x + LO.buffer.w + 6, y: LO.buffer.y + LO.buffer.h / 2 - 15, w: 40, h: 30 }, `${fill}/${S.buf}`);
+  ov.appendChild(bb);
+  if (S.banner !== 'none') {
+    const win = S.banner === 'win';
+    const sparks = win ? Array.from({ length: 12 }, (_, i) => {
+      const a = i / 12 * Math.PI * 2, r = 120 + (i % 3) * 30;
+      return `<div class="spark" style="left:calc(50% + ${Math.cos(a) * r}px);top:calc(50% + ${Math.sin(a) * r * 0.8}px);animation-delay:${(i * 0.13).toFixed(2)}s"></div>`;
+    }).join('') : '';
+    const html = `<div class="rays"></div>${sparks}<div class="card"><h2>${win ? 'Car stripped!' : 'Out of room'}</h2><p>${win ? 'Every Pin sorted.' : 'The Buffer is full.'}</p><button class="gbtn go">${win ? 'Play again' : 'Try again'}</button></div>`;
+    const bn = el('banner ' + (win ? 'win' : 'lose'), { x: 0, y: 0, w: LO.W, h: LO.H }, html);
+    const rays = bn.querySelector('.rays'); rays.style.left = `calc(50% - 300px)`; rays.style.top = `calc(50% - 300px)`;
+    if (S.style === 'A') { rays.style.left = `calc(50% - 280px)`; rays.style.top = `calc(50% - 280px)`; }
+    bn.querySelector('.card').style.maxWidth = (S.style === 'B' ? LO.W : LO.col.w - 40) + 'px';
+    bn.querySelector('.go').onclick = () => { S.banner = 'none'; apply(); };
+    ov.appendChild(bn);
+  }
+}
+
+// ===================================================================
+// Apply
+let zoom = 1, LO = null, lastRebuildKey = '';
+function currentScreen() {
+  const P = PRESETS[S.device];
+  if (P.real) {
+    const cs = getComputedStyle($('probe')), px = k => parseFloat(cs[k]) || 0;
+    return { W: innerWidth, H: innerHeight, ins: { t: px('paddingTop'), r: px('paddingRight'), b: px('paddingBottom'), l: px('paddingLeft') }, real: true, P };
+  }
+  let W = P.w, H = P.h, ins = { t: P.t, r: 0, b: P.b, l: 0 };
+  if (S.rotate) { [W, H] = [H, W]; ins = { t: 0, l: P.notch ? P.t : 0, r: P.notch ? P.t : 0, b: P.b ? 21 : 0 }; }
+  return { W, H, ins, P };
+}
+let stageScale = 1;
+function apply(rebuildCar) {
+  const scr = currentScreen();
+  document.body.classList.toggle('real', !!scr.real);
+  document.body.classList.toggle('narrow', innerWidth < 900);
+  const stage = $('stage'), wrap = $('frameWrap');
+  stage.className = 's' + S.style + (scr.P && scr.P.desktop ? ' desktop' : '');
+  stage.style.background = ST().bg;
+  if (!scr.real) {
+    stage.style.width = scr.W + 'px'; stage.style.height = scr.H + 'px';
+    const panelW = document.body.classList.contains('narrow') ? 0 : 420;
+    stageScale = Math.min(1, (innerHeight - 90) / scr.H, (innerWidth - panelW - 60) / scr.W);
+    wrap.style.transform = `scale(${stageScale})`;
+  } else { wrap.style.transform = ''; stageScale = 1; }
+  engine.resize();
+  const key = [S.style, S.k.shading, S.k.outlines, S.k.bevel, S.k.head, S.cb].join();
+  if (rebuildCar || key !== lastRebuildKey) { buildCar(); lastRebuildKey = key; }
+  LO = layout(scr.W, scr.H, scr.ins, { boxes: S.boxes, cap: S.cap, buf: S.buf });
+  hudCam.position.set(0, 0, -500);
+  hudCam.orthoLeft = 0; hudCam.orthoRight = scr.W; hudCam.orthoTop = 0; hudCam.orthoBottom = -scr.H;
+  buildHud(); placeModelCam(); buildOverlay(scr); panelInfo();
+  $('vlabel').textContent = `${S.style} · ${ST().name}`;
+  syncControls(); pushUrl();
+}
+function fitDistance() {
+  const { H, model } = LO, f = Math.tan(FOV / 2);
+  const half = Math.atan(Math.max(0.01, Math.min(f * model.w / H, f * model.h / H)));
+  return CAR_R / Math.sin(half);
+}
+function placeModelCam() {
+  const { W, H, model } = LO, f = Math.tan(FOV / 2), aspect = W / H, d = fitDistance() / zoom;
+  const cx = ((model.x + model.w / 2) / W) * 2 - 1, cy = 1 - ((model.y + model.h / 2) / H) * 2;
+  const X = cx * d * f * aspect, Y = cy * d * f;
+  modelCam.position.set(-X, -Y, -d); modelCam.setTarget(new V3(-X, -Y, 0));
+}
+const pinPxAt = d => PIN_D / (d * Math.tan(FOV / 2)) * (LO.H / 2);
+
+function panelInfo() {
+  $('styleNote').textContent = ST().note;
+  $('roles').innerHTML = ST().roles.map(([k, v]) => `<tr><td><span class="chip" style="background:${v}"></span>${k}</td><td>${v}</td></tr>`).join('');
+  $('typeNote').innerHTML = ST().font;
+  $('icons').innerHTML = [['any 192', 96, false, 22], ['maskable 512', 96, true, 0], ['apple-touch 180', 64, false, 14]].map(([label, px, mask, rad]) =>
+    `<figure>${appIcon(px, mask, rad)}<figcaption>${label}</figcaption></figure>`).join('');
+  const r = n => Math.round(n), fd = fitDistance();
+  const head1 = pinPxAt(fd), headMax = pinPxAt(fd / 2.2), tap = h => r(Math.max(h * 1.6, 36));
+  const fill = Math.min(S.bufFill, S.buf - 1);
+  $('fillLbl').textContent = `${fill} of ${S.buf} (${S.buf - fill} free)`;
+  $('rFill').max = S.buf - 1;
+  const rows = [
+    ['Screen', `${LO.W} × ${LO.H}`],
+    ['Box / slot / Pin head in Box', `${r(LO.boxes.boxW)} / ${r(LO.boxes.slot)} / ${r(LO.boxes.slot * K.pinInSlot)}`],
+    ['Buffer slot / Pin head', `${r(LO.buffer.slot)} / ${r(LO.buffer.slot * K.pinInSlot)}`],
+    ['Pin head on car, 1× / 2.2×', `${head1.toFixed(1)} / ${headMax.toFixed(1)}`],
+    ['Tap target, 1× / 2.2× (unchanged: same head diameter)', `${tap(head1)} / ${tap(headMax)}`],
+    ['Bottom bar right side', 'switch 48 · mute 48 · Restart 112'],
+  ];
+  $('read').innerHTML = rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+}
+// App icon: a Candy-red domed head with the cross recess, on the style's background.
+function appIcon(px, maskable, radius) {
+  const st = ST(), bgTop = st.roles.find(r => r[0].startsWith('Background'))[1], bgBot = st.roles[st.roles.length - 1][1];
+  const red = '#ff3b47', rim = hexScale(red, 0.78), wall = hexScale(red, 0.3), floor = hexScale(red, 0.5);
+  const headR = maskable ? 150 : 172;   // maskable: well inside the 40% (204.8) safe circle
+  const t = 0.17 * headR * 0.62, a = 0.78 * headR * 0.62;
+  const cross = (dy, fill) => `<path transform="translate(256 ${256 + dy})" d="M${-t} ${-a}H${t}V${-t}H${a}V${t}H${t}V${a}H${-t}V${t}H${-a}V${-t}H${-t}Z" fill="${fill}"/>`;
+  const outline = S.style === 'C' ? `stroke="#1b1b22" stroke-width="14"` : '';
+  return `<svg width="${px}" height="${px}" viewBox="0 0 512 512" style="border-radius:${radius}%;box-shadow:0 1px 4px #0003">
+    <defs><linearGradient id="g${px}${maskable}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${bgTop}"/><stop offset="1" stop-color="${bgBot}"/></linearGradient>
+    <clipPath id="cx${px}${maskable}"><path transform="translate(256 256)" d="M${-t} ${-a}H${t}V${-t}H${a}V${t}H${t}V${a}H${-t}V${t}H${-a}V${-t}H${-t}Z"/></clipPath></defs>
+    <rect width="512" height="512" fill="url(#g${px}${maskable})"/>
+    <ellipse cx="256" cy="${268 + headR * 0.08}" rx="${headR * 1.02}" ry="${headR * 0.98}" fill="#0002"/>
+    <circle cx="256" cy="262" r="${headR}" fill="${rim}" ${outline}/>
+    <circle cx="256" cy="252" r="${headR * 0.93}" fill="${red}"/>
+    <ellipse cx="${256 - headR * 0.35}" cy="${252 - headR * 0.45}" rx="${headR * 0.32}" ry="${headR * 0.16}" fill="#fff6" transform="rotate(-30 ${256 - headR * 0.35} ${252 - headR * 0.45})"/>
+    <g transform="translate(0 -4)">${cross(0, wall)}<g clip-path="url(#cx${px}${maskable})">${cross(headR * 0.08, floor)}</g></g>
+    ${maskable ? '<circle cx="256" cy="256" r="204.8" fill="none" stroke="#000a" stroke-width="4" stroke-dasharray="14 10"/>' : ''}
+  </svg>`;
+}
+
+// ===================================================================
+// Input: drag turns, pinch/wheel zooms, tap a Pin to pop it, tap a Part to flash it.
+const pointers = new Map(); let pinchStart = null, downAt = null;
+const toCanvas = e => { const rc = canvas.getBoundingClientRect(); return { x: (e.clientX - rc.left) / stageScale, y: (e.clientY - rc.top) / stageScale }; };
+canvas.addEventListener('pointerdown', e => {
+  canvas.setPointerCapture(e.pointerId); pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  downAt = pointers.size === 1 ? { x: e.clientX, y: e.clientY, moved: false } : null;
+  if (pointers.size === 2) pinchStart = { d: pinchDist(), z: zoom };
+});
+canvas.addEventListener('pointermove', e => {
+  const p = pointers.get(e.pointerId); if (!p) return;
+  const dx = e.clientX - p.x, dy = e.clientY - p.y; p.x = e.clientX; p.y = e.clientY;
+  if (downAt && Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > (e.pointerType === 'mouse' ? 4 : 10)) downAt.moved = true;
+  if (pointers.size === 1 && downAt && downAt.moved) {
+    const k = 0.009 / stageScale;
+    const qy = BABYLON.Quaternion.RotationAxis(new V3(0, 1, 0), -dx * k), qx = BABYLON.Quaternion.RotationAxis(new V3(1, 0, 0), -dy * k);
+    modelRoot.rotationQuaternion = qy.multiply(qx).multiply(modelRoot.rotationQuaternion);
+  } else if (pointers.size === 2 && pinchStart) setZoom(pinchStart.z * pinchDist() / pinchStart.d);
+});
+const up = e => {
+  if (downAt && !downAt.moved && pointers.size === 1) tap(toCanvas(e));
+  pointers.delete(e.pointerId); if (pointers.size < 2) pinchStart = null; downAt = null;
+};
+canvas.addEventListener('pointerup', up); canvas.addEventListener('pointercancel', e => { downAt = null; up(e); });
+canvas.addEventListener('wheel', e => { e.preventDefault(); setZoom(zoom * Math.exp(-e.deltaY * 0.0015)); }, { passive: false });
+function pinchDist() { const [a, b] = [...pointers.values()]; return Math.hypot(a.x - b.x, a.y - b.y) || 1; }
+function setZoom(z) { zoom = Math.max(1, Math.min(2.2, z)); placeModelCam(); }
+document.addEventListener('gesturestart', e => e.preventDefault());
+
+const tweens = [];
+function tap({ x, y }) {
+  const hit = scene.pick(x, y, m => m.layerMask === MODEL_LAYER && m.isEnabled() && m.isPickable && !!m.metadata, false, modelCam);
+  if (!hit || !hit.hit) return;
+  const md = hit.pickedMesh.metadata;
+  if (md.pinNode) popPin(md.pinNode); else if (md.part !== undefined) flashPart(md.part);
+}
+// Press highlight (1.25× with a white outline, settled in Gesture tuning), then pop out along the
+// Socket normal with the shank showing, hold, and screw back in (only to show the form here).
+function popPin(node) {
+  const M = node.metadata; if (M.busy) return; M.busy = true;
+  const head = M.head, was = { on: head.renderOutline, w: head.outlineWidth, c: head.outlineColor.clone() };
+  head.renderOutline = true; head.outlineWidth = 0.014; head.outlineColor = C3.White();
+  M.shank.setEnabled(true);
+  const ease = t => 1 - Math.pow(1 - t, 3);
+  tweens.push({ t0: performance.now(), dur: 1300, fn: t => {
+    const ms = t * 1300;
+    const s = ms < 90 ? 1 + 0.25 * ease(ms / 90) : ms < 1050 ? 1.25 : 1.25 - 0.25 * ease(Math.min(1, (ms - 1050) / 250));
+    const off = ms < 90 ? 0 : ms < 360 ? 0.3 * ease((ms - 90) / 270) : ms < 1050 ? 0.3 : 0.3 * (1 - ease(Math.min(1, (ms - 1050) / 250)));
+    node.scaling.setAll(s); node.position.copyFrom(M.base.add(M.n.scale(off)));
+    node.rotationQuaternion = node.rotationQuaternion.multiply(BABYLON.Quaternion.RotationAxis(new V3(0, 1, 0), ms > 90 && ms < 360 ? 0.18 : ms > 1050 ? -0.2 : 0));
+  }, done: () => { head.renderOutline = was.on; head.outlineWidth = was.w; head.outlineColor = was.c; M.shank.setEnabled(false); M.busy = false; } });
+}
+function flashPart(idx) {
+  const meshes = carParts[idx], fail = matFor('#ff3b47', 'body');
+  const orig = meshes.map(m => m.material);
+  tweens.push({ t0: performance.now(), dur: 360, fn: t => { const on = t < 0.25 || (t > 0.5 && t < 0.75); meshes.forEach((m, i) => (m.material = on ? fail : orig[i])); }, done: () => meshes.forEach((m, i) => (m.material = orig[i])) });
+}
+scene.onBeforeRenderObservable.add(() => {
+  const now = performance.now();
+  for (let i = tweens.length - 1; i >= 0; i--) {
+    const tw = tweens[i], t = Math.min(1, (now - tw.t0) / tw.dur);
+    tw.fn(t); if (t >= 1) { tw.done && tw.done(); tweens.splice(i, 1); }
+  }
+  const ph = (Math.sin(now / 1000 * Math.PI * 2 / 0.9) + 1) / 2;   // ~0.9 s pulse
+  pulses.forEach(p => { p.material.alpha = 0.25 + 0.75 * ph; p.scaling.setAll(1 + 0.08 * ph); });
+  const st = (now - shakeT0) / 1000;
+  const dx = st < 1.35 ? Math.sin(st * 40) * 3 * (1 - st / 1.35) : 0;
+  shakeMeshes.forEach(m => { if (m.metadata === null || m.metadata === undefined) m.metadata = { x0: m.position.x }; m.position.x = m.metadata.x0 + dx; });
+});
+
+// ===================================================================
+// Controls
+function seg(id, values, onPick, isOn, isDef) {
+  const host = $(id);
+  values.forEach(([v, label]) => {
+    const b = document.createElement('button'); b.textContent = label; b.dataset.v = v;
+    b.onclick = () => onPick(v); b._on = () => isOn(v); b._def = () => isDef && isDef(v); host.appendChild(b);
+  });
+}
+seg('segStyle', Object.entries(STYLES).map(([k, s]) => [k, `${k} · ${s.name}`]), v => setStyle(v), v => S.style === v);
+for (const key of Object.keys(KNOBS)) {
+  const id = 'seg' + key[0].toUpperCase() + key.slice(1);
+  seg(id, KNOBS[key], v => { S.k[key] = v; S.sheetOpen = false; apply(); }, v => S.k[key] === v, v => ST().knobs[key] === v);
+}
+seg('segBanner', [['none', 'None'], ['win', 'Win'], ['lose', 'Lose']], v => { S.banner = v; apply(); }, v => S.banner === v);
+Object.entries(PRESETS).forEach(([k, p]) => { const o = document.createElement('option'); o.value = k; o.textContent = p.name; $('selDevice').appendChild(o); });
+$('selDevice').onchange = e => { S.device = e.target.value; zoom = 1; apply(); };
+$('chkRotate').onchange = e => { S.rotate = e.target.checked; apply(); };
+$('chkCb').onchange = e => { S.cb = e.target.checked; apply(true); };
+$('chkMute').onchange = e => { S.mute = e.target.checked; apply(); };
+$('rFill').oninput = e => { S.bufFill = +e.target.value; apply(); };
+function setStyle(v) { S.style = v; S.k = { ...STYLES[v].knobs }; S.sheetOpen = false; apply(); }
+function syncControls() {
+  document.querySelectorAll('.seg button[data-v]').forEach(b => { b.classList.toggle('on', b._on()); b.classList.toggle('def', !!b._def()); });
+  $('selDevice').value = S.device; $('chkRotate').checked = S.rotate; $('chkRotate').disabled = !!PRESETS[S.device].real;
+  $('chkCb').checked = S.cb; $('chkMute').checked = S.mute; $('rFill').value = Math.min(S.bufFill, S.buf - 1);
+}
+const order = Object.keys(STYLES);
+const step = d => setStyle(order[(order.indexOf(S.style) + d + order.length) % order.length]);
+$('prev').onclick = () => step(-1); $('next').onclick = () => step(1);
+$('panelToggle').onclick = () => document.body.classList.toggle('panelOpen');
+document.addEventListener('keydown', e => {
+  if (e.target.closest && e.target.closest('input,textarea,select,[contenteditable]')) return;
+  if (e.key === 'ArrowLeft') step(-1); else if (e.key === 'ArrowRight') step(1);
+});
+addEventListener('resize', () => apply());
+addEventListener('orientationchange', () => setTimeout(apply, 200));
+document.fonts && document.fonts.ready.then(() => apply());
+
+apply(true);
+engine.runRenderLoop(() => scene.render());
+</script>
+</body>
+</html>
