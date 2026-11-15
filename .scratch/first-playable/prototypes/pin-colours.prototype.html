@@ -149,6 +149,13 @@ const VARIANTS = {
   D: { name: 'Symbols in Boxes and Buffer only', note: 'Pins on the car are colour only. Once a Pin is in a Box or the Buffer it shows its symbol, and each Box shows its symbol in its empty slots. Helps matching Buffer to Box, not choosing what to tap.' },
 };
 const PALETTES = {
+  // Candy: the bright, saturated toy-colour quality of the human's inspiration, in original values
+  // (not sampled from any game). Classic toy hues, purple swapped for pink so blue and purple
+  // can't merge under protanopia. Worst vision ≈ 7.8 at 5 colours, so a cue backs it up.
+  candy: { name: 'Candy', note: 'Bright toy colours in the spirit of the inspiration (own values). Red, yellow, green, blue, pink; purple comes 7th because blue and purple merge for red-green colour-blind players. Weakest pairs: yellow/green (protan) and red/green (deutan), ≈ 8.',
+    c: [['red', '#ff3b47'], ['yellow', '#ffd60a'], ['green', '#3ccf4e'], ['blue', '#2f6bff'], ['pink', '#ff6fc8'], ['orange', '#ff9419'], ['purple', '#9b4dff'], ['cyan', '#1ec8ef'], ['white', '#ffffff'], ['black', '#1b1b22']] },
+  candySafe: { name: 'Candy, colour-blind safe', note: 'Same candy values, the best-scoring five: red, orange, yellow, cyan, blue (≈ 11 in every vision). No green until 8 colours.',
+    c: [['red', '#ff3b47'], ['orange', '#ff9419'], ['yellow', '#ffd60a'], ['cyan', '#1ec8ef'], ['blue', '#2f6bff'], ['pink', '#ff6fc8'], ['purple', '#9b4dff'], ['green', '#3ccf4e'], ['white', '#ffffff'], ['black', '#1b1b22']] },
   ladder: { name: 'Ladder (scored)', note: 'Picked by the scoring script: hues spread in lightness as well as hue, with black as the fifth. Stays ≥ 15 in every vision up to 7 colours.',
     c: [['red', '#e63b3b'], ['yellow', '#ffd426'], ['sky', '#4fa3ff'], ['blue', '#2a55e0'], ['black', '#1b1b22'], ['navy', '#1f2f8f'], ['white', '#ffffff'], ['orange', '#ff9a1a'], ['cyan', '#36c8ec'], ['magenta', '#d63bb8']] },
   warm: { name: 'Ladder, no black', note: 'Same idea but the fifth colour is orange, not black: all five are saturated hues. Yellow and orange are the weak pair under deuteranopia.',
@@ -169,7 +176,7 @@ const PRESETS = {
 const pick = (k, obj, d) => (obj[params.get(k)] ? params.get(k) : d);
 const S = {
   variant: pick('variant', VARIANTS, 'A'),
-  palette: pick('palette', PALETTES, 'ladder'),
+  palette: pick('palette', PALETTES, 'candy'),
   n: Math.max(5, Math.min(10, parseInt(params.get('n')) || 5)),
   cvd: pick('cvd', CVDS, 'none'),
   shade: params.get('shade') === 'cel' ? 'cel' : 'lambert',
