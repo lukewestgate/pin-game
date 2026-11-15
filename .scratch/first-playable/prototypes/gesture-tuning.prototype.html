@@ -1,0 +1,802 @@
+<!doctype html>
+<!--
+  PROTOTYPE · throwaway. Ticket: Gesture tuning (issues/13-gesture-tuning.md).
+  Question: starting values for the pure tap / drag / press-and-hold classifier, and how small Pins
+  are made easy to hit, judged on a real phone.
+  Two pure modules sit in their own <script> blocks and can be lifted into src/input:
+    - gestureStep(state, event, K) → { state, out }   tap / drag / hold (Peek) / pinch classifier
+    - pickPin(x, y, candidates, K) → { id, how }       enlarged targets + nearest-unblocked assist
+  Everything else (the scene, panel, overlays) is a throwaway shell. The car, camera fit and HUD bands
+  are copied from screen-layout.prototype.html (layout A at 360 × 640). Pin colours: Candy 1–5.
+  Run: double-click, or for a phone:  python3 -m http.server 8000 --bind 0.0.0.0  in this folder,
+  then open http://<this-machine>:8000/gesture-tuning.prototype.html on the phone (same Wi-Fi).
+  Tuned values are kept in the URL, so a link carries them.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>PROTOTYPE: gesture tuning</title>
+<script>
+  window.onerror = (msg, src, line) => { const t = document.getElementById('log'); if (t) { t.style.color = '#c00'; t.textContent = 'ERROR: ' + msg + ' (line ' + line + ')'; } };
+</script>
+<script src="https://cdn.babylonjs.com/babylon.js"></script>
+<style>
+  :root { --accent: #3e63dd; --ink: #1c2024; --muted: #60646c; --line: #e0e1e6; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; font: 14px/1.45 system-ui, sans-serif; color: var(--ink); background: #2b2f36; overscroll-behavior: none; overflow: hidden; }
+  #stage { position: fixed; top: 0; bottom: 0; overflow: hidden; background: #cfe8f3; }
+  #c, #dbg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  #c { touch-action: none; outline: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+  #dbg { pointer-events: none; }
+  #overlay { position: absolute; inset: 0; pointer-events: none; }
+  #overlay > * { position: absolute; }
+  .ph { border: 1.5px dashed #0002; border-radius: 12px; background: #ffffff55; }
+  #log { font: 11px/1.35 ui-monospace, Menlo, monospace; color: #1c2024; white-space: pre; overflow: hidden; padding: 6px 8px; }
+  #log .hot { color: #c62a2f; }
+  .gbtn { position: absolute; pointer-events: auto; font: 600 15px/1 system-ui, sans-serif; color: #1c2024; background: #fff; border: 0; border-radius: 12px; box-shadow: 0 2px 0 #0002, 0 1px 6px #0001; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+  .gbtn.dev { background: #fff4c2; color: #6b4e00; font-weight: 500; font-size: 13px; }
+  #tag { font-size: 10px; color: #0007; }
+  #aimBadge { font: 600 12px/1 system-ui, sans-serif; color: #fff; background: #e5484d; border-radius: 999px; padding: 5px 9px; display: none; }
+  /* panel */
+  #panel { position: fixed; top: 0; right: 0; bottom: 0; width: 400px; overflow: auto; padding: 14px 16px 90px; background: #fff; z-index: 20; display: none; -webkit-overflow-scrolling: touch; }
+  body.docked #panel, body.panelOpen #panel { display: block; }
+  body:not(.docked) #panel { left: 0; width: auto; }
+  #panel h1 { font-size: 16px; margin: 0 0 4px; }
+  #panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 18px 0 6px; }
+  #panel p, #panel li { margin: 3px 0 6px; font-size: 13px; }
+  #panel ul { padding-left: 18px; margin: 4px 0; }
+  .muted { color: var(--muted); font-size: 12px; }
+  .ctl { display: grid; grid-template-columns: 1fr 64px; gap: 2px 8px; align-items: center; margin: 6px 0 2px; font-size: 13px; }
+  .ctl input[type=range] { grid-column: 1 / 3; width: 100%; }
+  .ctl output { text-align: right; font-family: ui-monospace, monospace; font-size: 12px; }
+  .ctl.changed output { background: #fff4c2; border-radius: 4px; }
+  .hint { font-size: 11.5px; color: var(--muted); margin: 0 0 4px; }
+  .seg { display: flex; gap: 4px; flex-wrap: wrap; margin: 4px 0; }
+  .seg button, .btn { font: inherit; font-size: 13px; padding: 6px 10px; border: 1px solid var(--line); background: #fff; border-radius: 6px; cursor: pointer; }
+  .seg button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .chk { display: flex; gap: 8px; align-items: center; font-size: 13px; margin: 6px 0; }
+  table.read { border-collapse: collapse; font-size: 12px; width: 100%; }
+  table.read td { padding: 2px 4px; border-bottom: 1px solid #f0f0f3; }
+  table.read td:last-child { font-family: ui-monospace, monospace; text-align: right; }
+  textarea { width: 100%; height: 150px; font: 11px/1.35 ui-monospace, monospace; }
+  #closePanel { position: sticky; top: 0; float: right; }
+  body.docked #closePanel { display: none; }
+  #probe { position: fixed; visibility: hidden; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="c"></canvas>
+  <canvas id="dbg"></canvas>
+  <div id="overlay"></div>
+</div>
+<div id="panel">
+  <button class="btn" id="closePanel">Close ✕</button>
+  <h1>Gesture tuning · prototype</h1>
+  <p class="muted">Throwaway. Tap a Pin to remove it, drag to turn the car, press and hold a Part to Peek, pinch or scroll to zoom. There are no Boxes or Buffer: the top bands only reserve their space so the car is its real size, and they show a live gesture log. Every value below is a developer constant. Changes apply at once and are saved in the URL.</p>
+
+  <h2>What to try on the phone</h2>
+  <ul>
+    <li><b>Taps.</b> Tap quickly, and tap while walking. Does every tap you mean count, and does no small drag count as a tap? The log shows each tap's time and how far your finger moved.</li>
+    <li><b>Small Pins.</b> At 1× the Pin heads are only about 17 px. Turn on <i>Aim test</i> and take about 30 taps. It shows how far off-centre your taps land, so you can see what target size you need.</li>
+    <li><b>Close Pins.</b> Try the three engine Pins (lift the bonnet first) and the two spare-wheel Pins at the back. Does the right one come off?</li>
+    <li><b>Blocked Pins.</b> Tap a seat Pin through the window: it should wiggle and its door should flash.</li>
+    <li><b>Peek.</b> Hold a door or the bonnet. Is the wait right, so it doesn't fire when you tap slowly? While Peeking, drag to turn the car, then let go.</li>
+    <li><b>Two fingers.</b> Start a hold or a drag, then put a second finger down. Then lift one finger of a pinch before the other.</li>
+    <li><b>Desktop.</b> Click, drag, hold, scroll, and pinch on a trackpad.</li>
+  </ul>
+
+  <div id="controls"></div>
+
+  <h2>Debug</h2>
+  <label class="chk"><input type="checkbox" id="chkTargets"> Show tap targets (green: tappable, grey: Blocked, dashed: assist reach)</label>
+  <label class="chk"><input type="checkbox" id="chkAim"> Aim test (taps don't remove Pins; tap the ringed Pin)</label>
+  <table class="read" id="aimRead"></table>
+  <div class="seg"><button id="bAimReset">Reset aim stats</button><button id="bRestart">Restart car</button><button id="bResetCam">Reset view</button><button id="bDefaults">All values to defaults</button></div>
+
+  <h2>Measured now</h2>
+  <table class="read" id="read"></table>
+
+  <h2>Current values (copy into the ticket)</h2>
+  <textarea id="json" readonly></textarea>
+</div>
+<div id="probe"></div>
+
+<!-- ================================================================================================
+     PURE MODULE 1: gesture classifier. No DOM. Time comes in on each event.
+     Events: { kind: 'down'|'move'|'up'|'cancel'|'tick', id, x, y, t, pointerType }
+     Out intents: press, pressCancel, tap, dragStart, drag{dx,dy}, dragEnd, holdStart, holdEnd,
+                  pinchStart, pinch{ratio}, pinchEnd
+     ============================================================================================= -->
+<script id="gestures">
+const GESTURE_DEFAULTS = {
+  holdMs: 400,          // a press held this long without moving starts Peek
+  slopTouchPx: 10,      // finger movement allowed before a press turns into a drag
+  slopMousePx: 4,       // same for a mouse
+  catchUp: true,        // when a drag starts, turn by the distance already moved (no lag behind the finger)
+  secondInHold: 'pinch',  // 'pinch': a second finger ends Peek and starts a pinch; 'ignore'
+  secondInDrag: 'pinch',  // 'pinch' | 'ignore'
+  afterPinch: 'wait',     // the finger left after a pinch: 'wait' (does nothing until lifted) | 'resume' (turns)
+};
+
+function gestureInit() { return { mode: 'idle' }; }
+
+function gestureStep(s, e, K) {
+  const out = [];
+  const emit = (type, extra) => out.push(Object.assign({ type, t: e.t }, extra));
+  const slop = pt => (pt === 'mouse' ? K.slopMousePx : K.slopTouchPx);
+  const hyp = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
+  const pinchFrom = (a, b) => ({ mode: 'pinching', a: { id: a.id, x: a.x, y: a.y }, b: { id: b.id, x: b.x, y: b.y }, d0: hyp(a.x, a.y, b.x, b.y) || 1 });
+
+  // A press held long enough is a hold, even if the tick that should have said so came late.
+  if (s.mode === 'pressed' && e.kind !== 'down' && e.t - s.t0 >= K.holdMs) {
+    emit('pressCancel'); emit('holdStart', { x: s.x0, y: s.y0 });
+    s = { mode: 'holding', id: s.id, pt: s.pt, x: s.x, y: s.y, hx: s.x, hy: s.y, turning: false, t0: s.t0 };
+  }
+
+  // A second finger landing on a one-finger gesture.
+  if (e.kind === 'down' && (s.mode === 'pressed' || s.mode === 'holding' || s.mode === 'dragging') && e.id !== s.id) {
+    const rule = s.mode === 'holding' ? K.secondInHold : s.mode === 'dragging' ? K.secondInDrag : 'pinch';
+    if (rule === 'ignore') return { s, out };
+    emit(s.mode === 'pressed' ? 'pressCancel' : s.mode === 'holding' ? 'holdEnd' : 'dragEnd', { reason: 'second finger' });
+    emit('pinchStart');
+    return { s: pinchFrom(s, e), out };
+  }
+
+  switch (s.mode) {
+    case 'idle':
+      if (e.kind === 'down') {
+        s = { mode: 'pressed', id: e.id, pt: e.pointerType, x0: e.x, y0: e.y, x: e.x, y: e.y, t0: e.t, maxMove: 0 };
+        emit('press', { x: e.x, y: e.y });
+      }
+      break;
+
+    case 'pressed':
+      if (e.id !== s.id && e.kind !== 'tick') break;
+      if (e.kind === 'move') {
+        const d = hyp(e.x, e.y, s.x0, s.y0);
+        s = Object.assign({}, s, { x: e.x, y: e.y, maxMove: Math.max(s.maxMove, d) });
+        if (d > slop(s.pt)) {
+          emit('pressCancel'); emit('dragStart', { x: s.x0, y: s.y0 });
+          if (K.catchUp) emit('drag', { dx: e.x - s.x0, dy: e.y - s.y0 });
+          s = { mode: 'dragging', id: s.id, pt: s.pt, x: e.x, y: e.y, t0: s.t0, path: d };
+        }
+      } else if (e.kind === 'up') {
+        emit('tap', { x: s.x0, y: s.y0, ms: e.t - s.t0, moved: s.maxMove });
+        s = gestureInit();
+      } else if (e.kind === 'cancel') {
+        emit('pressCancel'); s = gestureInit();
+      }
+      break;
+
+    case 'holding':
+      if (e.id !== s.id) break;
+      if (e.kind === 'move') {
+        if (!s.turning) {
+          if (hyp(e.x, e.y, s.hx, s.hy) > slop(s.pt)) {
+            s = Object.assign({}, s, { turning: true });
+            if (K.catchUp) emit('drag', { dx: e.x - s.hx, dy: e.y - s.hy });
+          }
+        } else emit('drag', { dx: e.x - s.x, dy: e.y - s.y });
+        s = Object.assign({}, s, { x: e.x, y: e.y });
+      } else if (e.kind === 'up' || e.kind === 'cancel') {
+        emit('holdEnd', { ms: e.t - s.t0 }); s = gestureInit();
+      }
+      break;
+
+    case 'dragging':
+      if (e.id !== s.id) break;
+      if (e.kind === 'move') {
+        const dx = e.x - s.x, dy = e.y - s.y;
+        emit('drag', { dx, dy });
+        s = Object.assign({}, s, { x: e.x, y: e.y, path: s.path + Math.hypot(dx, dy) });
+      } else if (e.kind === 'up' || e.kind === 'cancel') {
+        emit('dragEnd', { ms: e.t - s.t0, path: s.path }); s = gestureInit();
+      }
+      break;
+
+    case 'pinching': {
+      const which = e.id === s.a.id ? 'a' : e.id === s.b.id ? 'b' : null;
+      if (!which) break;   // a third finger is ignored
+      if (e.kind === 'move') {
+        s = Object.assign({}, s, { [which]: { id: e.id, x: e.x, y: e.y } });
+        emit('pinch', { ratio: hyp(s.a.x, s.a.y, s.b.x, s.b.y) / s.d0 });
+      } else if (e.kind === 'up' || e.kind === 'cancel') {
+        emit('pinchEnd');
+        const rest = which === 'a' ? s.b : s.a;
+        if (K.afterPinch === 'resume') { emit('dragStart', { x: rest.x, y: rest.y }); s = { mode: 'dragging', id: rest.id, pt: 'touch', x: rest.x, y: rest.y, t0: e.t, path: 0 }; }
+        else s = { mode: 'waiting', id: rest.id, x: rest.x, y: rest.y };
+      }
+      break;
+    }
+
+    case 'waiting':   // one finger left over from a pinch: ignored until lifted, or joined by a new finger
+      if (e.kind === 'down' && e.id !== s.id) { emit('pinchStart'); s = pinchFrom(s, e); }
+      else if (e.id === s.id && e.kind === 'move') s = Object.assign({}, s, { x: e.x, y: e.y });
+      else if (e.id === s.id && (e.kind === 'up' || e.kind === 'cancel')) s = gestureInit();
+      break;
+  }
+  return { s, out };
+}
+</script>
+
+<!-- ================================================================================================
+     PURE MODULE 2: which Pin a tap means. No DOM, no engine.
+     candidates: [{ id, x, y, r, visible, blocked, depth }]   (screen CSS px; r = drawn head radius)
+     ============================================================================================= -->
+<script id="picking">
+const PICK_DEFAULTS = {
+  targetScale: 1.6,      // tap target radius = drawn head radius × this ...
+  minTargetPx: 36,       // ... but never smaller than this diameter
+  assistPx: 18,          // a tap that hits no target takes the nearest tappable Pin whose target edge is this close
+  preferUnblocked: true, // where targets overlap, a tappable Pin wins over a Blocked one
+  ambiguityPx: 0,        // if > 0: two tappable Pins this close in score → no pick (ambiguous). 0 = off
+};
+
+function targetRadius(c, K) { return Math.max(c.r * K.targetScale, K.minTargetPx / 2); }
+
+function pickPin(x, y, cands, K) {
+  const scored = [];
+  for (const c of cands) {
+    if (!c.visible) continue;
+    const R = targetRadius(c, K), d = Math.hypot(c.x - x, c.y - y);
+    scored.push({ c, R, d, norm: d / R, edge: d - R });
+  }
+  const byNorm = (a, b) => a.norm - b.norm || a.c.depth - b.c.depth;
+  const direct = scored.filter(p => p.d <= p.R).sort(byNorm);
+  const free = direct.filter(p => !p.c.blocked);
+  let pool = K.preferUnblocked && free.length ? free : direct;
+  if (pool.length) {
+    const best = pool[0];
+    if (K.ambiguityPx > 0 && pool.length > 1 && !best.c.blocked && !pool[1].c.blocked
+        && Math.abs(pool[1].d - best.d) < K.ambiguityPx) return { id: null, how: 'ambiguous', d: best.d };
+    return { id: best.c.id, how: 'direct', d: best.d };
+  }
+  const near = scored.filter(p => !p.c.blocked && p.edge <= K.assistPx).sort((a, b) => a.edge - b.edge || a.c.depth - b.c.depth);
+  if (near.length) {
+    if (K.ambiguityPx > 0 && near.length > 1 && near[1].edge - near[0].edge < K.ambiguityPx) return { id: null, how: 'ambiguous', d: near[0].d };
+    return { id: near[0].c.id, how: 'assist', d: near[0].d };
+  }
+  return { id: null, how: 'miss' };
+}
+</script>
+
+<!-- ================================================================================================
+     Throwaway shell: scene, feedback, panel.
+     ============================================================================================= -->
+<script>
+const $ = id => document.getElementById(id);
+const FEEDBACK_DEFAULTS = {
+  highlightOnPress: true,   // the Pin a tap would take grows and gets a white outline while pressed
+  peekFadeMs: 120, peekAlpha: 0.22,
+  wiggleMs: 320, wiggleAmp: 0.05,
+  flashCover: true,         // a Blocked tap also flashes the Part covering the Pin
+  vibrate: true,            // Android only (iOS Safari has no vibrate)
+  peekPinPart: true,        // holding on a Pin Peeks the Part that Pin holds
+};
+const TURN_DEFAULTS = { turnDeg: 200, turnMode: 'free' };   // degrees for a drag across the Model region's width
+const ZOOM_DEFAULTS = { zoomMax: 2.2, pinchGain: 1.0, wheelGain: 0.0015, padGain: 0.01 };
+const DEFAULTS = Object.assign({}, GESTURE_DEFAULTS, PICK_DEFAULTS, FEEDBACK_DEFAULTS, TURN_DEFAULTS, ZOOM_DEFAULTS);
+const K = Object.assign({}, DEFAULTS);
+(function readUrl() {
+  const p = new URLSearchParams(location.search);
+  for (const k of Object.keys(DEFAULTS)) {
+    if (!p.has(k)) continue;
+    const v = p.get(k), d = DEFAULTS[k];
+    K[k] = typeof d === 'number' ? parseFloat(v) : typeof d === 'boolean' ? v === '1' : v;
+  }
+})();
+function writeUrl() {
+  const p = new URLSearchParams();
+  for (const k of Object.keys(DEFAULTS)) if (K[k] !== DEFAULTS[k]) p.set(k, typeof K[k] === 'boolean' ? (K[k] ? '1' : '0') : K[k]);
+  history.replaceState(null, '', p.toString() ? '?' + p : location.pathname);
+  $('json').value = JSON.stringify(K, null, 2);
+}
+
+// HUD bands (layout A at 360 × 640, CSS px). The Box row and Buffer are placeholders here.
+const BAND = { margin: 10, boxRow: 104, gap: 8, buffer: 49, bar: 48 };
+const CANDY = ['#ff3b47', '#ffd60a', '#3ccf4e', '#2f6bff', '#ff6fc8'];
+
+// ---- Babylon scene -----------------------------------------------------------------------------
+const V3 = BABYLON.Vector3;
+const canvas = $('c');
+const engine = new BABYLON.Engine(canvas, true, { stencil: true, antialias: true });
+const DPR = Math.min(2, window.devicePixelRatio || 1);
+engine.setHardwareScalingLevel(1 / DPR);
+const scene = new BABYLON.Scene(engine);
+scene.clearColor = BABYLON.Color4.FromHexString('#cfe8f3ff');
+const FOV = 0.8;
+const cam = new BABYLON.FreeCamera('cam', new V3(0, 0, -14), scene);
+cam.fov = FOV; cam.minZ = 0.1; cam.inputs.clear();
+const hemi = new BABYLON.HemisphericLight('h', new V3(0.2, 1, -0.4), scene); hemi.intensity = 0.85;
+const sun = new BABYLON.DirectionalLight('d', new V3(-0.4, -1, 0.7), scene); sun.intensity = 0.55;
+
+function makeMat(hex, emissive = 0.2) {
+  const m = new BABYLON.StandardMaterial('m', scene);
+  m.diffuseColor = BABYLON.Color3.FromHexString(hex); m.specularColor = new BABYLON.Color3(0.05, 0.05, 0.05);
+  m.emissiveColor = m.diffuseColor.scale(emissive); m.metadata = { base: m.emissiveColor.clone() };
+  return m;
+}
+const OUTLINE = new BABYLON.Color3(0.12, 0.12, 0.14);
+function outline(m, w) { m.renderOutline = true; m.outlineWidth = w; m.outlineColor = OUTLINE.clone(); return m; }
+const PIN_H = 0.22, PIN_D = 0.24;
+const pinTemplate = BABYLON.MeshBuilder.CreateCylinder('pinT', { height: PIN_H, diameterTop: PIN_D, diameterBottom: 0.12, tessellation: 14 }, scene);
+pinTemplate.bakeTransformIntoVertices(BABYLON.Matrix.Translation(0, PIN_H / 2, 0)); pinTemplate.setEnabled(false);
+
+// ---- The car (shapes and Sockets from screen-layout.prototype.html, covering from Car level design) ----
+const modelRoot = new BABYLON.TransformNode('modelRoot', scene);
+modelRoot.rotationQuaternion = BABYLON.Quaternion.Identity();
+const carNode = new BABYLON.TransformNode('car', scene); carNode.parent = modelRoot; carNode.position.y = -1.05;
+const parts = [], pins = [];
+(function buildCar() {
+  const C = { cream: '#f3e6c8', tyre: '#3a3d42', hub: '#c9ccd1', interior: '#b8bcc2', chassis: '#7d838a', light: '#fff6c2', engine: '#8a9099' };
+  const UP = [0, 1, 0], L = [0, 0, -1], R = [0, 0, 1], BACK = [-1, 0, 0];
+  const box = (s, p, c) => ({ k: 'box', s, p, c });
+  const cylZ = (d, h, p, c) => ({ k: 'cyl', d, h, p, c, r: [Math.PI / 2, 0, 0] });
+  const cylX = (d, h, p, c) => ({ k: 'cyl', d, h, p, c, r: [0, 0, Math.PI / 2] });
+  const wheel = (x, z) => [cylZ(0.9, 0.3, [x, 0.45, z], C.tyre), cylZ(0.45, 0.32, [x, 0.45, z], C.hub)];
+  // cov: index of the Part covering that Socket (inner Pins only).
+  const P = [
+    { id: 'wheel-fl', shapes: wheel(1.3, -0.98), sockets: [{ p: [1.3, 0.45, -1.14], n: L }] },
+    { id: 'wheel-fr', shapes: wheel(1.3, 0.98), sockets: [{ p: [1.3, 0.45, 1.14], n: R }] },
+    { id: 'wheel-rl', shapes: wheel(-1.3, -0.98), sockets: [{ p: [-1.3, 0.45, -1.14], n: L }] },
+    { id: 'wheel-rr', shapes: wheel(-1.3, 0.98), sockets: [{ p: [-1.3, 0.45, 1.14], n: R }] },
+    { id: 'bonnet', shapes: [box([1.25, 0.12, 1.7], [1.35, 1.18, 0], C.cream)], sockets: [{ p: [1.65, 1.24, 0.4], n: UP }, { p: [1.05, 1.24, -0.4], n: UP }] },
+    { id: 'roof', shapes: [box([2.3, 0.12, 1.75], [-0.35, 1.98, 0], C.cream)], sockets: [{ p: [0.25, 2.04, 0.4], n: UP }, { p: [-0.95, 2.04, -0.4], n: UP }] },
+    { id: 'door-l', shapes: [box([1.7, 0.65, 0.1], [-0.3, 0.95, -0.86], C.cream)], sockets: [{ p: [-0.75, 1.02, -0.91], n: L }, { p: [0.15, 1.02, -0.91], n: L }] },
+    { id: 'door-r', shapes: [box([1.7, 0.65, 0.1], [-0.3, 0.95, 0.86], C.cream)], sockets: [{ p: [-0.75, 1.02, 0.91], n: R }, { p: [0.15, 1.02, 0.91], n: R }] },
+    { id: 'tailgate', shapes: [box([0.1, 1.05, 1.7], [-1.55, 1.4, 0], C.cream)], sockets: [{ p: [-1.6, 1.8, 0.68], n: BACK }, { p: [-1.6, 1.0, -0.68], n: BACK }] },
+    { id: 'spare-wheel', shapes: [cylX(0.8, 0.2, [-1.7, 1.4, 0], C.tyre), cylX(0.4, 0.22, [-1.71, 1.4, 0], C.hub)], sockets: [{ p: [-1.82, 1.4, 0.13], n: BACK }, { p: [-1.82, 1.4, -0.13], n: BACK }] },
+    { id: 'axle-front', shapes: [cylZ(0.14, 1.7, [1.3, 0.45, 0], C.chassis)], sockets: [{ p: [1.3, 0.45, -0.8], n: L, cov: 0 }, { p: [1.3, 0.45, 0.8], n: R, cov: 1 }] },
+    { id: 'axle-rear', shapes: [cylZ(0.14, 1.7, [-1.3, 0.45, 0], C.chassis)], sockets: [{ p: [-1.3, 0.45, -0.8], n: L, cov: 2 }, { p: [-1.3, 0.45, 0.8], n: R, cov: 3 }] },
+    { id: 'engine', shapes: [box([0.9, 0.4, 1.1], [1.35, 0.8, 0], C.engine)], sockets: [{ p: [1.1, 1.0, -0.3], n: UP, cov: 4 }, { p: [1.35, 1.0, 0.3], n: UP, cov: 4 }, { p: [1.6, 1.0, -0.1], n: UP, cov: 4 }] },
+    { id: 'seat-l', shapes: [box([0.5, 0.15, 0.5], [0.1, 0.75, -0.4], C.interior), box([0.12, 0.6, 0.5], [-0.15, 1.0, -0.4], C.interior)], sockets: [{ p: [0.25, 0.77, -0.65], n: L, cov: 6 }, { p: [-0.15, 1.0, -0.65], n: L, cov: 6 }] },
+    { id: 'seat-r', shapes: [box([0.5, 0.15, 0.5], [0.1, 0.75, 0.4], C.interior), box([0.12, 0.6, 0.5], [-0.15, 1.0, 0.4], C.interior)], sockets: [{ p: [0.25, 0.77, 0.65], n: R, cov: 7 }, { p: [-0.15, 1.0, 0.65], n: R, cov: 7 }] },
+    { id: 'steering-wheel', shapes: [{ k: 'torus', d: 0.4, t: 0.05, p: [0.5, 1.35, -0.4], c: C.tyre, r: [0, 0, 0.5] }, { k: 'cyl', d: 0.06, h: 0.45, p: [0.62, 1.15, -0.4], c: C.tyre, r: [0, 0, 0.6] }], sockets: [{ p: [0.5, 1.37, -0.4], n: UP, cov: 5 }] },
+    { id: 'rear-seat', shapes: [box([0.5, 0.5, 1.45], [-1.15, 0.85, 0], C.interior)], sockets: [{ p: [-1.4, 0.95, 0.35], n: BACK, cov: 8 }, { p: [-1.4, 0.95, -0.35], n: BACK, cov: 8 }] },
+    { id: 'chassis', shapes: [box([4.0, 0.3, 1.6], [0, 0.45, 0], C.chassis), box([0.15, 0.55, 1.6], [1.95, 0.85, 0], C.cream),
+      ...[[0.75, -0.8], [0.75, 0.8], [-1.45, -0.8], [-1.45, 0.8]].map(([x, z]) => box([0.12, 0.75, 0.12], [x, 1.55, z], C.cream))], sockets: [] },
+    { id: 'bumper-front', shapes: [box([0.25, 0.3, 1.9], [2.1, 0.5, 0], C.chassis)], sockets: [] },
+    { id: 'bumper-rear', shapes: [box([0.25, 0.3, 1.9], [-2.1, 0.5, 0], C.chassis)], sockets: [] },
+    { id: 'headlight-l', shapes: [cylX(0.3, 0.08, [2.04, 0.95, -0.55], C.light)], sockets: [] },
+    { id: 'headlight-r', shapes: [cylX(0.3, 0.08, [2.04, 0.95, 0.55], C.light)], sockets: [] },
+  ];
+  let seed = 7; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const deck = []; for (let k = 0; k < 5; k++) for (let j = 0; j < 6; j++) deck.push(k);
+  for (let i = deck.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [deck[i], deck[j]] = [deck[j], deck[i]]; }
+  let di = 0;
+  const up = new V3(0, 1, 0);
+  P.forEach((part, pi) => {
+    const rec = { id: part.id, index: pi, meshes: [], pins: [], gone: false, core: part.sockets.length === 0, alpha: 1, alphaTarget: 1, fall: null, flash: 0 };
+    for (const s of part.shapes) {
+      let m;
+      if (s.k === 'box') m = BABYLON.MeshBuilder.CreateBox('s', { width: s.s[0], height: s.s[1], depth: s.s[2] }, scene);
+      else if (s.k === 'cyl') m = BABYLON.MeshBuilder.CreateCylinder('s', { diameter: s.d, height: s.h, tessellation: 32 }, scene);
+      else m = BABYLON.MeshBuilder.CreateTorus('s', { diameter: s.d, thickness: s.t, tessellation: 32 }, scene);
+      m.position.set(...s.p); if (s.r) m.rotation.set(...s.r);
+      m.material = makeMat(s.c); m.parent = carNode; outline(m, 0.015);
+      m.metadata = { part: pi, home: m.position.clone() };
+      rec.meshes.push(m);
+    }
+    for (const so of part.sockets) {
+      const m = pinTemplate.clone('pin'); m.setEnabled(true);
+      const colour = deck[di++];
+      m.material = makeMat(CANDY[colour]); outline(m, 0.02); m.parent = carNode;
+      m.position.set(...so.p);
+      const n = new V3(...so.n), d = V3.Dot(up, n);
+      m.rotationQuaternion = d > 0.9999 ? BABYLON.Quaternion.Identity() : BABYLON.Quaternion.RotationAxis(V3.Cross(up, n).normalize(), Math.acos(d));
+      const pin = { id: pins.length, part: pi, cov: so.cov === undefined ? [] : [so.cov], colour, mesh: m, home: m.position.clone(), n, removed: false, anim: null };
+      m.metadata = { part: pi, pin: pin.id };
+      pins.push(pin); rec.pins.push(pin.id);
+    }
+    parts.push(rec);
+  });
+})();
+const CAR_R = (function () {
+  let r = 0;
+  carNode.getChildMeshes().forEach(m => { m.computeWorldMatrix(true); m.getBoundingInfo().boundingBox.vectorsWorld.forEach(v => { r = Math.max(r, v.length()); }); });
+  return r;
+})();
+const isBlocked = pin => pin.cov.some(pi => !parts[pi].gone);   // judged on the rules state, never on what's visible
+
+// ---- Turning ------------------------------------------------------------------------------------
+const START = { yaw: -0.65, pitch: 0.32 };
+let yaw = START.yaw, pitch = START.pitch;
+const qAxis = (ax, a) => BABYLON.Quaternion.RotationAxis(ax, a);
+function setTurntable() { modelRoot.rotationQuaternion = qAxis(new V3(1, 0, 0), pitch).multiply(qAxis(new V3(0, 1, 0), yaw)); }
+function turn(dx, dy) {
+  const k = (K.turnDeg * Math.PI / 180) / Math.max(1, LO.model.w);
+  if (K.turnMode === 'turntable') {
+    yaw -= dx * k; pitch = Math.max(-1.4, Math.min(1.4, pitch - dy * k)); setTurntable();
+  } else {
+    const qy = qAxis(new V3(0, 1, 0), -dx * k), qx = qAxis(new V3(1, 0, 0), -dy * k);
+    modelRoot.rotationQuaternion = qy.multiply(qx).multiply(modelRoot.rotationQuaternion);
+  }
+}
+function resetView() { yaw = START.yaw; pitch = START.pitch; setTurntable(); zoom = 1; placeCam(); }
+
+// ---- Layout and camera --------------------------------------------------------------------------
+let LO = null, zoom = 1;
+function insets() {
+  const cs = getComputedStyle($('probe'));
+  return { t: parseFloat(cs.paddingTop) || 0, r: parseFloat(cs.paddingRight) || 0, b: parseFloat(cs.paddingBottom) || 0, l: parseFloat(cs.paddingLeft) || 0 };
+}
+function layout() {
+  const iw = innerWidth, ih = innerHeight;
+  const wide = iw / ih > 0.75;
+  const docked = wide && iw >= Math.round(ih * 9 / 16) + 420;
+  document.body.classList.toggle('docked', docked);
+  const W = wide ? Math.min(iw, Math.round(ih * 9 / 16)) : iw, H = ih;
+  const left = docked ? Math.max(0, Math.round((iw - 400 - W) / 2)) : Math.round((iw - W) / 2);
+  const st = $('stage'); st.style.left = left + 'px'; st.style.width = W + 'px';
+  const ins = wide ? { t: 0, r: 0, b: 0, l: 0 } : insets();
+  const x0 = ins.l + BAND.margin, w0 = W - ins.l - ins.r - 2 * BAND.margin;
+  const boxes = { x: x0, y: ins.t + BAND.margin, w: w0, h: BAND.boxRow };
+  const buffer = { x: x0, y: boxes.y + boxes.h + BAND.gap, w: w0, h: BAND.buffer };
+  const top = buffer.y + buffer.h + BAND.margin;
+  const bar = { x: x0, y: H - ins.b - BAND.margin - BAND.bar, w: w0, h: BAND.bar };
+  const model = { x: ins.l, y: top, w: W - ins.l - ins.r, h: bar.y - BAND.margin - top };
+  LO = { W, H, ins, boxes, buffer, bar, model };
+  engine.resize();
+  const dbg = $('dbg'); dbg.width = W * DPR; dbg.height = H * DPR;
+  placeCam(); buildOverlay();
+}
+function fitDistance() {
+  const { H, model } = LO, f = Math.tan(FOV / 2);
+  const half = Math.atan(Math.max(0.01, Math.min(f * model.w / H, f * model.h / H)));
+  return CAR_R / Math.sin(half);
+}
+function placeCam() {
+  const { W, H, model } = LO, f = Math.tan(FOV / 2), aspect = W / H, d = fitDistance() / zoom;
+  const cx = ((model.x + model.w / 2) / W) * 2 - 1, cy = 1 - ((model.y + model.h / 2) / H) * 2;
+  const X = cx * d * f * aspect, Y = cy * d * f;
+  cam.position.set(-X, -Y, -d); cam.setTarget(new V3(-X, -Y, 0));
+}
+function setZoom(z) { zoom = Math.max(1, Math.min(K.zoomMax, z)); placeCam(); }
+
+// ---- Screen-space candidates for picking -------------------------------------------------------
+function viewProj() { return cam.getViewMatrix(true).multiply(cam.getProjectionMatrix(true)); }
+function toScreen(w, vp) { const p = V3.TransformCoordinates(w, vp); return { x: (p.x + 1) / 2 * LO.W, y: (1 - p.y) / 2 * LO.H, z: p.z }; }
+const isSolid = m => m.isEnabled() && m.metadata && m.metadata.part !== undefined && !parts[m.metadata.part].fall;
+function candidates() {
+  scene.updateTransformMatrix(true);
+  const vp = viewProj(), camPos = cam.globalPosition, right = cam.getDirection(V3.Right());
+  const out = [];
+  for (const pin of pins) {
+    if (pin.removed) continue;
+    const wm = pin.mesh.computeWorldMatrix(true);
+    const head = V3.TransformCoordinates(new V3(0, PIN_H * 0.9, 0), wm);
+    const tip = V3.TransformCoordinates(new V3(0, PIN_H + 0.01, 0), wm);
+    const a = toScreen(head, vp), b = toScreen(head.add(right.scale(PIN_D / 2)), vp);
+    const dir = tip.subtract(camPos), len = dir.length();
+    const hit = scene.pickWithRay(new BABYLON.Ray(camPos, dir.normalize(), len), m => isSolid(m) && m !== pin.mesh);
+    const visible = !(hit && hit.hit && hit.distance < len - 0.02);
+    out.push({ id: pin.id, x: a.x, y: a.y, r: Math.hypot(b.x - a.x, b.y - a.y), visible, blocked: isBlocked(pin), depth: len });
+  }
+  return out;
+}
+const inModel = (x, y) => { const m = LO.model; return x >= m.x && x <= m.x + m.w && y >= m.y && y <= m.y + m.h; };
+function pickAt(x, y) {
+  if (!inModel(x, y)) return { id: null, how: 'outside', cands: [] };
+  const cands = candidates();
+  return Object.assign(pickPin(x, y, cands, K), { cands });
+}
+
+// ---- Feedback -----------------------------------------------------------------------------------
+let highlighted = null, peekPart = null, now = performance.now();
+function highlight(id) {
+  if (highlighted !== null) { const m = pins[highlighted].mesh; m.scaling.setAll(1); m.outlineColor = OUTLINE.clone(); m.outlineWidth = 0.02; }
+  highlighted = id;
+  if (id !== null) { const m = pins[id].mesh; m.scaling.setAll(1.25); m.outlineColor = BABYLON.Color3.White(); m.outlineWidth = 0.035; }
+}
+function buzz(ms) { if (K.vibrate && navigator.vibrate) navigator.vibrate(ms); }
+function wiggle(pin) {
+  pin.anim = { kind: 'wiggle', t0: now };
+  if (K.flashCover) pin.cov.forEach(pi => { parts[pi].flash = now; });
+  buzz(18);
+}
+function removePin(pin) {
+  pin.removed = true; pin.anim = { kind: 'out', t0: now };
+  const part = parts[pin.part];
+  if (part.pins.every(id => pins[id].removed)) {
+    part.gone = true;   // rules state: Pins behind it are tappable at once
+    const inv = modelRoot.getWorldMatrix().clone().invert();
+    part.fall = { t0: now + 150, dir: V3.TransformNormal(new V3(0, -1, 0), inv).normalize() };
+  }
+}
+function startPeek(x, y) {
+  if (!inModel(x, y)) return null;
+  let pi = null;
+  const p = pickAt(x, y);
+  if (p.id !== null && K.peekPinPart) pi = pins[p.id].part;
+  if (pi === null) {
+    const hit = scene.pick(x, y, m => isSolid(m), false, cam);
+    if (hit && hit.hit && hit.pickedMesh) pi = hit.pickedMesh.metadata.part;
+  }
+  if (pi === null) return null;
+  peekPart = pi; parts[pi].alphaTarget = K.peekAlpha; buzz(10);
+  return parts[pi].id;
+}
+function endPeek() { if (peekPart !== null) parts[peekPart].alphaTarget = 1; peekPart = null; }
+
+let lastFrame = performance.now();
+scene.onBeforeRenderObservable.add(() => {
+  now = performance.now(); const dt = now - lastFrame; lastFrame = now;
+  feed({ kind: 'tick', t: now });
+  for (const pin of pins) {
+    const a = pin.anim; if (!a) continue;
+    const p = (now - a.t0) / (a.kind === 'out' ? 200 : K.wiggleMs);
+    if (a.kind === 'wiggle') {
+      const side = V3.Cross(pin.n, Math.abs(pin.n.y) > 0.9 ? new V3(1, 0, 0) : new V3(0, 1, 0)).normalize();
+      if (p >= 1) { pin.mesh.position.copyFrom(pin.home); pin.anim = null; }
+      else pin.mesh.position.copyFrom(pin.home.add(side.scale(K.wiggleAmp * Math.sin(p * Math.PI * 6) * (1 - p))));
+    } else {
+      if (p >= 1) { pin.mesh.setEnabled(false); pin.anim = null; }
+      else { pin.mesh.position.copyFrom(pin.home.add(pin.n.scale(0.6 * p))); pin.mesh.scaling.setAll(p < 0.5 ? 1 : 1 - (p - 0.5) * 1.6); }
+    }
+  }
+  for (const part of parts) {
+    // Peek fade (a constant rate, so the fade-in time is exact)
+    const rate = dt / Math.max(1, K.peekFadeMs) * (1 - K.peekAlpha);
+    if (part.alpha !== part.alphaTarget) part.alpha = part.alpha < part.alphaTarget ? Math.min(part.alphaTarget, part.alpha + rate) : Math.max(part.alphaTarget, part.alpha - rate);
+    let a = part.alpha;
+    if (part.fall && now >= part.fall.t0) {
+      const p = Math.min(1, (now - part.fall.t0) / 450);
+      part.meshes.forEach(m => m.position.copyFrom(m.metadata.home.add(part.fall.dir.scale(3 * p * p))));
+      a = Math.min(a, 1 - p);
+      if (p >= 1) part.meshes.forEach(m => m.setEnabled(false));
+    }
+    const fl = part.flash && now - part.flash < 350 ? 1 - (now - part.flash) / 350 : 0;
+    part.meshes.forEach(m => {
+      m.material.alpha = a; m.needDepthPrePass = a < 1;
+      m.material.emissiveColor = BABYLON.Color3.Lerp(m.material.metadata.base, new BABYLON.Color3(1, 0.35, 0.35), fl * 0.8);
+    });
+  }
+});
+
+// ---- Input: DOM pointer events → classifier → intents --------------------------------------------
+let G = gestureInit(), pinchZ0 = 1;
+const LOG = [];
+function log(line, hot) { LOG.unshift({ line, hot }); LOG.length = Math.min(LOG.length, 7); renderLog(); }
+function feed(e) { const r = gestureStep(G, e, K); G = r.s; r.out.forEach(handle); }
+function handle(o) {
+  switch (o.type) {
+    case 'press': if (K.highlightOnPress && !aim.on) { const p = pickAt(o.x, o.y); highlight(p.id); } break;
+    case 'pressCancel': highlight(null); break;
+    case 'tap': {
+      highlight(null);
+      const p = pickAt(o.x, o.y);
+      const tail = `${Math.round(o.ms)} ms, moved ${o.moved.toFixed(1)} px`;
+      if (aim.on) { aimTap(o, p, tail); break; }
+      if (p.id === null) { log(`tap (${tail}) → ${p.how === 'outside' ? 'outside the Model' : p.how === 'ambiguous' ? 'AMBIGUOUS, nothing' : 'missed'}`, p.how === 'ambiguous'); break; }
+      const pin = pins[p.id], name = `${parts[pin.part].id} Pin`;
+      if (isBlocked(pin)) { wiggle(pin); log(`tap (${tail}) → ${name} is Blocked, wiggle`); }
+      else { removePin(pin); log(`tap (${tail}) → ${name} removed (${p.how}${p.how === 'assist' ? `, ${p.d.toFixed(0)} px from centre` : ''})`); }
+      break;
+    }
+    case 'dragStart': highlight(null); break;
+    case 'drag': turn(o.dx, o.dy); break;
+    case 'dragEnd': {
+      const short = o.ms < 250 && o.path < 3 * K.slopTouchPx;
+      log(`drag ${Math.round(o.ms)} ms, ${Math.round(o.path)} px${o.reason ? ' (' + o.reason + ')' : ''}${short ? '  ← short: a missed tap?' : ''}`, short);
+      break;
+    }
+    case 'holdStart': { highlight(null); const id = startPeek(o.x, o.y); log(`hold → Peek ${id || '(nothing under finger)'}`); break; }
+    case 'holdEnd': endPeek(); log(`Peek ended${o.reason ? ' (' + o.reason + ')' : ''}`); break;
+    case 'pinchStart': pinchZ0 = zoom; break;
+    case 'pinch': setZoom(pinchZ0 * Math.pow(o.ratio, K.pinchGain)); break;
+    case 'pinchEnd': log(`pinch → zoom ${zoom.toFixed(2)}×`); break;
+  }
+}
+function pt(e) { const r = canvas.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+canvas.addEventListener('pointerdown', e => {
+  if (e.pointerType === 'mouse' && e.button !== 0) return;
+  canvas.setPointerCapture(e.pointerId);
+  feed(Object.assign({ kind: 'down', id: e.pointerId, t: e.timeStamp, pointerType: e.pointerType }, pt(e)));
+});
+canvas.addEventListener('pointermove', e => feed(Object.assign({ kind: 'move', id: e.pointerId, t: e.timeStamp }, pt(e))));
+canvas.addEventListener('pointerup', e => feed(Object.assign({ kind: 'up', id: e.pointerId, t: e.timeStamp }, pt(e))));
+canvas.addEventListener('pointercancel', e => feed(Object.assign({ kind: 'cancel', id: e.pointerId, t: e.timeStamp }, pt(e))));
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  const dy = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1);
+  setZoom(zoom * Math.exp(-dy * (e.ctrlKey ? K.padGain : K.wheelGain)));   // ctrlKey: a trackpad pinch
+}, { passive: false });
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+document.addEventListener('gesturestart', e => e.preventDefault());   // iOS Safari page zoom
+
+// ---- Aim test --------------------------------------------------------------------------------------
+const aim = { on: false, target: null, n: 0, right: 0, wrong: 0, none: 0, offs: [], offsR: [] };
+function aimNext() {
+  const c = candidates().filter(c => c.visible && !c.blocked && inModel(c.x, c.y));
+  aim.target = c.length ? c[Math.floor(Math.random() * c.length)].id : null;
+}
+function aimTap(o, p, tail) {
+  const c = p.cands.find(c => c.id === aim.target);
+  if (!c) { aimNext(); return; }
+  const off = Math.hypot(o.x - c.x, o.y - c.y);
+  aim.n++; aim.offs.push(off); aim.offsR.push(off / c.r);
+  if (p.id === aim.target) aim.right++; else if (p.id === null) aim.none++; else aim.wrong++;
+  const verdict = p.id === aim.target ? 'right Pin' : p.id === null ? 'NOTHING' : 'WRONG Pin';
+  log(`aim (${tail}) → ${verdict}, ${off.toFixed(1)} px off (head ${(2 * c.r).toFixed(0)} px)`, p.id !== aim.target);
+  aimNext(); renderAim();
+}
+function pct(a, n) { return n ? Math.round(100 * a / n) + '%' : '–'; }
+function quant(arr, q) { if (!arr.length) return '–'; const s = [...arr].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.floor(q * s.length))]; }
+function renderAim() {
+  const f = v => (typeof v === 'number' ? v.toFixed(1) : v);
+  const rows = [
+    ['Taps', aim.n], ['Right Pin', pct(aim.right, aim.n)], ['Wrong Pin', pct(aim.wrong, aim.n)], ['Nothing picked', pct(aim.none, aim.n)],
+    ['Offset from centre, median (px)', f(quant(aim.offs, 0.5))], ['Offset, 90th percentile (px)', f(quant(aim.offs, 0.9))],
+    ['Offset, 90th pct (in head radii)', f(quant(aim.offsR, 0.9))],
+  ];
+  $('aimRead').innerHTML = aim.on || aim.n ? rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('') : '';
+  $('aimBadge').style.display = aim.on ? 'block' : 'none';
+  $('aimBadge').textContent = `Aim test · ${aim.n} taps · ${pct(aim.right, aim.n)} right`;
+}
+
+// ---- Debug drawing ---------------------------------------------------------------------------------
+const dctx = $('dbg').getContext('2d');
+function drawDebug() {
+  dctx.setTransform(DPR, 0, 0, DPR, 0, 0); dctx.clearRect(0, 0, LO.W, LO.H);
+  const show = $('chkTargets').checked;
+  if (!show && !aim.on) return;
+  const cands = candidates();
+  if (show) for (const c of cands) {
+    if (!c.visible) continue;
+    const R = targetRadius(c, K);
+    dctx.lineWidth = 1.5; dctx.setLineDash([]);
+    dctx.strokeStyle = c.blocked ? '#0005' : '#18794e'; dctx.fillStyle = c.blocked ? '#0001' : '#30a46c22';
+    dctx.beginPath(); dctx.arc(c.x, c.y, R, 0, 7); dctx.fill(); dctx.stroke();
+    if (!c.blocked && K.assistPx > 0) { dctx.setLineDash([3, 4]); dctx.strokeStyle = '#18794e66'; dctx.beginPath(); dctx.arc(c.x, c.y, R + K.assistPx, 0, 7); dctx.stroke(); }
+  }
+  if (aim.on) {
+    let c = cands.find(c => c.id === aim.target);
+    if (!c || !c.visible || !inModel(c.x, c.y)) { aimNext(); c = cands.find(c => c.id === aim.target); }
+    if (c) {
+      const pulse = 1 + 0.15 * Math.sin(now / 120);
+      dctx.setLineDash([]); dctx.lineWidth = 2.5; dctx.strokeStyle = '#e5484d';
+      dctx.beginPath(); dctx.arc(c.x, c.y, Math.max(10, c.r * 2.2) * pulse, 0, 7); dctx.stroke();
+    }
+  }
+}
+
+// ---- Overlay, log, readouts ------------------------------------------------------------------------
+function el(tag, cls, r, html = '') {
+  const d = document.createElement(tag); d.className = cls;
+  d.style.cssText = `left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px`;
+  d.innerHTML = html; return d;
+}
+function buildOverlay() {
+  const ov = $('overlay'); ov.innerHTML = '';
+  const { boxes, buffer, bar } = LO;
+  const bw = (boxes.w - 20) / 3;
+  for (let i = 0; i < 3; i++) ov.appendChild(el('div', 'ph', { x: boxes.x + (boxes.w - (3 * bw + 20)) / 2 + i * (bw + 10), y: boxes.y, w: bw, h: boxes.h }));
+  ov.appendChild(el('div', 'ph', { x: buffer.x, y: buffer.y, w: buffer.w, h: buffer.h }));
+  const lg = el('div', '', { x: boxes.x, y: boxes.y, w: boxes.w, h: boxes.h + BAND.gap + buffer.h }); lg.id = 'log'; ov.appendChild(lg);
+  const tune = el('button', 'gbtn dev', { x: bar.x, y: bar.y, w: 104, h: bar.h }, '⚙ Tuning'); tune.onclick = () => document.body.classList.add('panelOpen');
+  const rs = el('button', 'gbtn', { x: bar.x + bar.w - 120, y: bar.y, w: 120, h: bar.h }, 'Restart'); rs.onclick = restart;
+  ov.appendChild(tune); ov.appendChild(rs);
+  const badge = el('div', '', { x: bar.x + 114, y: bar.y + 14, w: 'auto', h: 'auto' }); badge.id = 'aimBadge'; badge.style.width = badge.style.height = ''; ov.appendChild(badge);
+  const tag = el('div', '', { x: LO.model.x + 6, y: LO.model.y + 2, w: 160, h: 14 }, 'PROTOTYPE · throwaway'); tag.id = 'tag'; ov.appendChild(tag);
+  renderLog(); renderAim();
+}
+function renderLog() {
+  const lg = $('log'); if (!lg) return;
+  lg.innerHTML = LOG.length ? LOG.map(l => `<div class="${l.hot ? 'hot' : ''}">${l.line}</div>`).join('') : '<div>Gesture log. Tap, drag, hold or pinch the car.</div>';
+}
+let readTimer = 0;
+function readout() {
+  const fd = fitDistance();
+  const pinPx = d => PIN_D / (d * Math.tan(FOV / 2)) * (LO.H / 2);
+  const rows = [
+    ['Screen (CSS px) / DPR', `${LO.W} × ${LO.H} / ${DPR}`],
+    ['Safe insets t/r/b/l', `${LO.ins.t}/${LO.ins.r}/${LO.ins.b}/${LO.ins.l}`],
+    ['Model region', `${Math.round(LO.model.w)} × ${Math.round(LO.model.h)}`],
+    ['Zoom', `${zoom.toFixed(2)}×`],
+    ['Pin head now (front-on, px)', pinPx(fd / zoom).toFixed(1)],
+    ['Pin head at 1× / max (px)', `${pinPx(fd).toFixed(1)} / ${pinPx(fd / K.zoomMax).toFixed(1)}`],
+    ['Tap target at 1× (diameter px)', Math.max(pinPx(fd) * K.targetScale, K.minTargetPx).toFixed(0)],
+    ['Classifier state', G.mode],
+    ['Pins left', pins.filter(p => !p.removed).length],
+  ];
+  $('read').innerHTML = rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+}
+function restart() {
+  for (const pin of pins) { pin.removed = false; pin.anim = null; pin.mesh.setEnabled(true); pin.mesh.position.copyFrom(pin.home); pin.mesh.scaling.setAll(1); }
+  for (const part of parts) { part.gone = false; part.fall = null; part.alpha = part.alphaTarget = 1; part.meshes.forEach(m => { m.setEnabled(true); m.position.copyFrom(m.metadata.home); }); }
+  peekPart = null; highlight(null); log('restarted');
+}
+
+// ---- Panel controls ----------------------------------------------------------------------------------
+const SPEC = [
+  ['h', 'Tap, drag and hold'],
+  ['n', 'holdMs', 'Hold to start Peek (ms)', 200, 900, 10, 'Shorter feels quicker but slow taps start Peek by mistake.'],
+  ['n', 'slopTouchPx', 'Finger movement before a drag (px)', 2, 30, 1, 'A tap that wobbles less than this still counts as a tap.'],
+  ['n', 'slopMousePx', 'Mouse movement before a drag (px)', 1, 15, 1],
+  ['b', 'catchUp', 'When a drag starts, turn by the distance already moved'],
+  ['h', 'Hitting small Pins'],
+  ['n', 'targetScale', 'Tap target = drawn head × ', 1, 3, 0.05],
+  ['n', 'minTargetPx', 'Smallest tap target (diameter px)', 0, 60, 1, 'Apple and Google suggest 44–48 px for buttons; Pins sit closer together than buttons.'],
+  ['n', 'assistPx', 'Assist: reach beyond a target (px)', 0, 60, 1, 'A tap on no target takes the nearest tappable Pin whose target edge is within this. Never a Blocked Pin.'],
+  ['b', 'preferUnblocked', 'Where targets overlap, a tappable Pin beats a Blocked one'],
+  ['n', 'ambiguityPx', 'Refuse a tap when two Pins are this close to equal (px, 0 = off)', 0, 20, 1],
+  ['b', 'peekPinPart', 'Holding on a Pin Peeks the Part it holds'],
+  ['h', 'Turning'],
+  ['n', 'turnDeg', 'Degrees for a drag across the Model area', 90, 400, 10],
+  ['s', 'turnMode', 'How a drag turns', [['free', 'Free (any axis)'], ['turntable', 'Turntable (upright, tilt limited)']]],
+  ['h', 'Zoom (1× to max, no panning)'],
+  ['n', 'zoomMax', 'Max zoom', 1.2, 4, 0.1],
+  ['n', 'pinchGain', 'Pinch gain (1 = zoom follows the fingers)', 0.5, 2, 0.05],
+  ['n', 'wheelGain', 'Mouse wheel gain', 0.0005, 0.005, 0.0001],
+  ['n', 'padGain', 'Trackpad pinch gain', 0.002, 0.03, 0.001],
+  ['h', 'Two fingers'],
+  ['s', 'secondInHold', 'Second finger during Peek', [['pinch', 'Ends Peek, starts a pinch'], ['ignore', 'Ignored']]],
+  ['s', 'secondInDrag', 'Second finger during a drag', [['pinch', 'Ends the drag, starts a pinch'], ['ignore', 'Ignored']]],
+  ['s', 'afterPinch', 'Finger left after a pinch', [['wait', 'Does nothing until lifted'], ['resume', 'Turns the car']]],
+  ['h', 'Feedback'],
+  ['b', 'highlightOnPress', 'Pin grows and gets a white outline while pressed'],
+  ['n', 'peekFadeMs', 'Peek fade (ms)', 0, 400, 10],
+  ['n', 'peekAlpha', 'Peek opacity', 0.05, 0.6, 0.01],
+  ['n', 'wiggleMs', 'Blocked wiggle (ms)', 100, 700, 10],
+  ['n', 'wiggleAmp', 'Blocked wiggle size', 0.01, 0.12, 0.005],
+  ['b', 'flashCover', 'A Blocked tap flashes the Part in the way'],
+  ['b', 'vibrate', 'Vibrate on Blocked tap and Peek (Android only)'],
+];
+function buildControls() {
+  const host = $('controls'); host.innerHTML = '';
+  for (const s of SPEC) {
+    if (s[0] === 'h') { const h = document.createElement('h2'); h.textContent = s[1]; host.appendChild(h); continue; }
+    const [kind, key, label] = s;
+    if (kind === 'n') {
+      const [, , , lo, hi, step, hint] = s;
+      const d = document.createElement('div'); d.className = 'ctl';
+      const dec = step < 0.01 ? 4 : step < 0.1 ? 2 : step < 1 ? 1 : 0;
+      d.innerHTML = `<span>${label}</span><output></output><input type="range" min="${lo}" max="${hi}" step="${step}" value="${K[key]}">`;
+      const out = d.querySelector('output'), inp = d.querySelector('input');
+      const sync = () => { out.textContent = (+K[key]).toFixed(dec); d.classList.toggle('changed', K[key] !== DEFAULTS[key]); };
+      inp.oninput = () => { K[key] = parseFloat(inp.value); sync(); changed(key); };
+      sync(); host.appendChild(d);
+      if (hint) { const p = document.createElement('p'); p.className = 'hint'; p.textContent = hint; host.appendChild(p); }
+    } else if (kind === 'b') {
+      const l = document.createElement('label'); l.className = 'chk';
+      l.innerHTML = `<input type="checkbox" ${K[key] ? 'checked' : ''}> ${label}`;
+      l.querySelector('input').onchange = e => { K[key] = e.target.checked; changed(key); };
+      host.appendChild(l);
+    } else {
+      const p = document.createElement('div'); p.className = 'hint'; p.textContent = label; host.appendChild(p);
+      const g = document.createElement('div'); g.className = 'seg';
+      for (const [v, t] of s[3]) {
+        const b = document.createElement('button'); b.textContent = t; b.classList.toggle('on', K[key] === v);
+        b.onclick = () => { K[key] = v; [...g.children].forEach(c => c.classList.toggle('on', c === b)); changed(key); };
+        g.appendChild(b);
+      }
+      host.appendChild(g);
+    }
+  }
+}
+function changed(key) {
+  if (key === 'zoomMax') setZoom(zoom);
+  if (key === 'turnMode' && K.turnMode === 'turntable') setTurntable();
+  writeUrl();
+}
+$('closePanel').onclick = () => document.body.classList.remove('panelOpen');
+$('chkAim').onchange = e => { aim.on = e.target.checked; if (aim.on) aimNext(); renderAim(); };
+$('bAimReset').onclick = () => { Object.assign(aim, { n: 0, right: 0, wrong: 0, none: 0, offs: [], offsR: [] }); renderAim(); };
+$('bRestart').onclick = restart;
+$('bResetCam').onclick = resetView;
+$('bDefaults').onclick = () => { Object.assign(K, DEFAULTS); buildControls(); writeUrl(); setZoom(zoom); };
+
+addEventListener('resize', layout);
+addEventListener('orientationchange', () => setTimeout(layout, 200));
+buildControls(); writeUrl(); setTurntable(); layout();
+engine.runRenderLoop(() => {
+  scene.render(); drawDebug();
+  if (now - readTimer > 250) { readTimer = now; readout(); }
+});
+</script>
+</body>
+</html>
