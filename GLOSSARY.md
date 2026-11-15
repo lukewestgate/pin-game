@@ -51,6 +51,10 @@ _Avoid_: Locked, hidden, covered (as a state name)
 Pressing and holding on a Part to see it transparently, showing the Pins beneath so the player can plan ahead.
 _Avoid_: X-ray, preview
 
+**Random-tap win rate**:
+The share of games won by tapping a random removable Pin each turn. The working measure of how easy a Level is.
+_Avoid_: Win rate (alone), difficulty score
+
 ### Game (future: not in the first version)
 
 **Campaign**:
