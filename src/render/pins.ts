@@ -38,6 +38,9 @@ export function pinMarkCode(): {
       CUSTOM_VERTEX_DEFINITIONS: `
 attribute vec3 pinColor;
 attribute float markIndex;
+#ifndef UV1
+attribute vec2 uv;
+#endif
 varying vec3 vPinColor;
 varying float vMarkIndex;
 varying vec2 vMarkUV;
@@ -86,6 +89,7 @@ class PinMarkPlugin extends MaterialPluginBase {
 
   override getAttributes(attributes: string[]): void {
     attributes.push('pinColor', 'markIndex');
+    if (!attributes.includes('uv')) attributes.push('uv');
   }
 
   override getSamplers(samplers: string[]): void {
