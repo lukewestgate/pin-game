@@ -16,6 +16,13 @@ export interface PinCandidate {
   depth: number;
 }
 
+export interface CandidatesNear {
+  x: number;
+  y: number;
+  /** The distance from (x, y) at which a Pin of drawn radius `r` can still be picked. */
+  reach(r: number): number;
+}
+
 export interface Pick {
   id: number | null;
   how: 'direct' | 'assist' | 'miss';

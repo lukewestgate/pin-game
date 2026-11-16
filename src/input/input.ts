@@ -3,12 +3,20 @@
 import { pinchZoom, wheelZoom } from './camera-control';
 import { CAMERA, FEEDBACK, GESTURE, PICK } from './constants';
 import { gestureInit, gestureStep, type GestureState, type Intent } from './gestures';
-import { pickPin, type PinCandidate } from './picking';
+import { pickPin, targetRadius, type CandidatesNear, type PinCandidate } from './picking';
+
+/** Casting a ray per Pin is the costly part, so a press only tests the Pins it could pick. */
+const nearPoint = (x: number, y: number): CandidatesNear => ({
+  x,
+  y,
+  reach: (r) => targetRadius({ r } as PinCandidate, PICK) + PICK.assistPx,
+});
 
 export interface InputHost {
   /** The Model region in CSS px. Picking happens only inside it. */
   modelRegion(): { x: number; y: number; w: number; h: number };
-  candidates(): PinCandidate[];
+  /** Pin candidates; with `near`, Pins too far from the point to be picked are left out. */
+  candidates(near?: CandidatesNear): PinCandidate[];
   zoom(): number;
   setZoom(zoom: number): void;
   turn(dx: number, dy: number): void;
@@ -41,7 +49,7 @@ export function attachInput(canvas: HTMLCanvasElement, host: InputHost): Input {
   };
   const pick = (x: number, y: number, candidates: PinCandidate[] | null = null) =>
     inRegion(x, y)
-      ? pickPin(x, y, candidates ?? host.candidates(), PICK)
+      ? pickPin(x, y, candidates ?? host.candidates(nearPoint(x, y)), PICK)
       : { id: null, how: 'miss' as const };
 
   function handle(intent: Intent): void {
@@ -55,7 +63,9 @@ export function attachInput(canvas: HTMLCanvasElement, host: InputHost): Input {
       case 'tap': {
         host.highlight(null);
         // Projecting every Pin is costly, so a tap computes the candidates once.
-        const candidates = inRegion(intent.x, intent.y) ? host.candidates() : [];
+        const candidates = inRegion(intent.x, intent.y)
+          ? host.candidates(nearPoint(intent.x, intent.y))
+          : [];
         const { id } = pick(intent.x, intent.y, candidates);
         if (id === null) break;
         if (candidates.find((c) => c.id === id)?.blocked) {

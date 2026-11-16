@@ -67,6 +67,30 @@ describe('game view input support', () => {
     expect(cands.find((c) => c.id === index('engine-1'))?.blocked).toBe(true);
   });
 
+  it('leaves out Pins too far from a press to be picked, without changing the rest', () => {
+    const { view } = setup();
+    const all = view.candidates(state);
+    const roof = all.find((c) => c.id === index('roof-1'));
+    if (!roof) throw new Error('roof-1 missing');
+    const near = view.candidates(state, { x: roof.x, y: roof.y, reach: () => 30 });
+    expect(near.length).toBeGreaterThan(0);
+    expect(near.length).toBeLessThan(all.length);
+    expect(near.find((c) => c.id === roof.id)).toEqual(roof);
+    for (const c of near) expect(Math.hypot(c.x - roof.x, c.y - roof.y)).toBeLessThanOrEqual(30);
+  });
+
+  it('warms the outline and Peek shaders without leaving any state behind', () => {
+    const { view } = setup();
+    view.warmUp();
+    expect(view.peeking()).toBeNull();
+    expect(view.scene.materials.filter((m) => m.name.endsWith('-peek'))).toEqual([]);
+    expect(
+      view.scene.meshes.some(
+        (m) => m.renderOutline && !(m.metadata as { decor?: boolean } | null)?.decor,
+      ),
+    ).toBe(false);
+  });
+
   it('marks a Pin whose head the camera cannot see as not visible', () => {
     const { view, camera } = setup();
     // Look at the car from straight behind its left side so the engine Pins are inside the car.

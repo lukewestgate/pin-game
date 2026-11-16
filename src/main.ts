@@ -196,7 +196,7 @@ function tapPin(pin: number): void {
 
 const input = attachInput(canvas, {
   modelRegion: () => view.layout.model,
-  candidates: () => view.candidates(history.present),
+  candidates: (near) => view.candidates(history.present, near),
   zoom: () => view.zoom,
   setZoom: (z) => view.setZoom(z),
   turn: (dx, dy) => view.turn(dx, dy),
@@ -235,6 +235,7 @@ window.addEventListener('resize', () => {
 });
 
 show();
+view.warmUp();
 engine.runRenderLoop(() => {
   input.tick(performance.now());
   audio.tick(performance.now());

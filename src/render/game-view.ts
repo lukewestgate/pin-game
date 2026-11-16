@@ -6,7 +6,7 @@ import type { LoadedLevel } from '../content/loader';
 import { CANDY } from '../content/palette';
 import { CAMERA, FEEDBACK } from '../input/constants';
 import { turn as turnView } from '../input/camera-control';
-import type { PinCandidate } from '../input/picking';
+import type { CandidatesNear, PinCandidate } from '../input/picking';
 import { blockersOf, hasFallen, isBlocked, type State } from '../rules/state';
 import type { RulesEvent } from '../rules/rules';
 import { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera.pure';
@@ -109,7 +109,9 @@ export interface GameView {
   /** Turntable drag of (dx, dy) CSS px. */
   turn(dx: number, dy: number): void;
   /** Pin candidates for picking: projected head, drawn radius, visibility, Blocked, depth. */
-  candidates(state: State): PinCandidate[];
+  candidates(state: State, near?: CandidatesNear): PinCandidate[];
+  /** Compiles the press-outline and Peek shaders now, so the first press doesn't stall. */
+  warmUp(): void;
   /** Press feedback: the Pin grows and gets a white outline. `null` clears it. */
   highlight(pin: number | null): void;
   /** Blocked tap feedback at time `now` (ms): shake the Pin, flash its covering Parts red. */
@@ -725,7 +727,7 @@ export function createGameView(
   }
 
   // ---- Input support: picking candidates, turning, zoom and tap feedback ----
-  function candidates(state: State): PinCandidate[] {
+  function candidates(state: State, near?: CandidatesNear): PinCandidate[] {
     const m = layout.model;
     const viewMatrix = camera.getViewMatrix(true);
     const transform = viewMatrix.multiply(camera.getProjectionMatrix(true));
@@ -740,6 +742,8 @@ export function createGameView(
       const head = mesh.getAbsolutePosition().add(dir.scale(PIN.height / 2));
       const screen = Vector3.Project(head, Matrix.IdentityReadOnly, transform, viewport);
       const depth = Vector3.TransformCoordinates(head, viewMatrix).z;
+      const r = ((PIN.diameter / 2) * focal) / Math.max(depth, 1e-6);
+      if (near && Math.hypot(screen.x - near.x, screen.y - near.y) > near.reach(r)) return;
       const toHead = head.subtract(eye);
       const distance = toHead.length();
       const hit = scene.pickWithRay(
@@ -755,7 +759,7 @@ export function createGameView(
         id: i,
         x: screen.x,
         y: screen.y,
-        r: ((PIN.diameter / 2) * focal) / Math.max(depth, 1e-6),
+        r,
         visible,
         blocked: isBlocked(level, state, i),
         depth,
@@ -884,10 +888,34 @@ export function createGameView(
     }
   }
 
+  // The press outline and the Peek fade each need a shader variant (instanced outline, alpha blend)
+  // that nothing draws until the first press, and compiling it mid-gesture is a visible stall.
+  function warmUp(): void {
+    const first = pinMeshes.findIndex((m) => m.isEnabled());
+    if (first < 0) return;
+    highlight(first);
+    scene.render();
+    highlight(null);
+    peekAt(0, 0, first, clock());
+    for (const entry of fading.values()) {
+      for (const mesh of entry.swaps.keys()) if (mesh.material) mesh.material.alpha = 0.5;
+    }
+    scene.render();
+    for (const entry of fading.values()) {
+      for (const [mesh, shared] of entry.swaps) {
+        mesh.material?.dispose();
+        mesh.material = shared;
+      }
+    }
+    fading.clear();
+    peekEnd();
+  }
+
   fitCameras();
 
   return {
     scene,
+    warmUp,
     get layout() {
       return layout;
     },
