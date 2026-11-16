@@ -1,13 +1,27 @@
-/* Plain walking-skeleton styles. The Workbench HUD look arrives with ticket 29. */
+/* The Workbench look: painted tin on dark slate, rounded Baloo 2 type, teal pill buttons. */
+:root {
+  --ink: #13202a;
+  --teal: #129fc0;
+  --teal-edge: #0b6f86;
+  --go: #3ccf4e;
+  --go-edge: #228a31;
+  --gold: #ffd60a;
+  --gold-edge: #b39300;
+  --slate: #5a6b75;
+  --slate-edge: #3f4d56;
+}
+
 html,
 body {
   margin: 0;
   height: 100%;
   overflow: hidden;
   overscroll-behavior: none;
+  /* The vignette sits behind the transparent canvas and fills the letterbox and safe areas. */
   background: radial-gradient(120% 75% at 50% 48%, #5a7783, #34505b 55%, #1f2f36);
   color: #fff;
-  font-family: system-ui, sans-serif;
+  font-family: 'Baloo 2', system-ui, sans-serif;
+  font-weight: 600;
 }
 
 * {
@@ -44,28 +58,219 @@ body {
   pointer-events: none;
 }
 
+/* The bottom bar: dev Undo, a gap, Settings, Mute, Restart. Fits 360 px: 104 + 48 + 48 + 112 + gaps. */
 #bar {
   position: fixed;
   display: flex;
-  justify-content: space-between;
   gap: 6px;
+  align-items: stretch;
 }
 
-#bar button {
+#bar .spacer {
+  flex: 1;
+}
+
+.pill {
   font: inherit;
-  font-weight: 700;
-  padding: 0 18px;
+  font-weight: 800;
+  font-size: 18px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  box-sizing: border-box;
+  padding: 0 14px;
   border: 0;
   border-radius: 24px;
-  background: #13a3c4;
+  background: var(--teal);
   color: #fff;
+  box-shadow: 0 3px 0 var(--teal-edge);
+  margin-bottom: 3px;
+  cursor: pointer;
+  touch-action: manipulation;
 }
 
-#bar button.dev {
-  background: #ffd60a;
-  color: #13202a;
+#bar .pill {
+  height: 45px;
 }
 
-#bar button:disabled {
+.pill:active:not(:disabled) {
+  transform: translateY(3px);
+  box-shadow: 0 0 0 var(--teal-edge);
+}
+
+.pill.icon {
+  width: 48px;
+  padding: 0;
+}
+
+#undo {
+  width: 104px;
+}
+
+#restart {
+  width: 112px;
+}
+
+.pill.dev {
+  background: var(--gold);
+  color: var(--ink);
+  box-shadow: 0 3px 0 var(--gold-edge);
+}
+
+.pill.dev small {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 1px 5px;
+  border-radius: 6px;
+  background: var(--ink);
+  color: var(--gold);
+}
+
+.pill.dev:active:not(:disabled) {
+  box-shadow: 0 0 0 var(--gold-edge);
+}
+
+.pill.go {
+  background: var(--go);
+  color: var(--ink);
+  box-shadow: 0 3px 0 var(--go-edge);
+  height: 52px;
+  padding: 0 28px;
+  font-size: 22px;
+}
+
+.pill.go:active:not(:disabled) {
+  box-shadow: 0 0 0 var(--go-edge);
+}
+
+.pill:disabled {
   opacity: 0.5;
+}
+
+[data-icon] {
+  display: inline-flex;
+}
+
+/* Win and lose: a dimmed scene, a ribbon sliding in from the left, one button. */
+#outcome {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 28px;
+  background: #0008;
+}
+
+#outcome.hidden {
+  display: none;
+}
+
+#outcome .ribbon {
+  position: relative;
+  width: 100%;
+  padding: 22px 0 26px;
+  text-align: center;
+  background: var(--slate);
+  box-shadow: 0 6px 0 var(--slate-edge);
+  animation: ribbon-in 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.25) both;
+}
+
+#outcome.won .ribbon {
+  background: var(--gold);
+  color: var(--ink);
+  box-shadow: 0 6px 0 var(--gold-edge);
+}
+
+#outcome h1 {
+  margin: 0;
+  font-size: 40px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+#outcome .stitch {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 8px;
+  border-bottom: 2px dashed currentColor;
+  opacity: 0.45;
+}
+
+#outcome .sparkles {
+  display: none;
+}
+
+#outcome.won .sparkles {
+  display: block;
+}
+
+#outcome .sparkles i {
+  position: absolute;
+  font-style: normal;
+  color: #fff;
+  font-size: 18px;
+  animation: twinkle 1.2s ease-in-out infinite;
+}
+
+#outcome .sparkles i:nth-child(1) {
+  left: 8%;
+  top: 14%;
+}
+#outcome .sparkles i:nth-child(2) {
+  left: 22%;
+  top: 68%;
+  animation-delay: 0.3s;
+}
+#outcome .sparkles i:nth-child(3) {
+  left: 40%;
+  top: 6%;
+  animation-delay: 0.6s;
+}
+#outcome .sparkles i:nth-child(4) {
+  left: 62%;
+  top: 72%;
+  animation-delay: 0.15s;
+}
+#outcome .sparkles i:nth-child(5) {
+  left: 80%;
+  top: 12%;
+  animation-delay: 0.45s;
+}
+#outcome .sparkles i:nth-child(6) {
+  left: 92%;
+  top: 60%;
+  animation-delay: 0.75s;
+}
+
+@keyframes ribbon-in {
+  from {
+    transform: translateX(-110%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes twinkle {
+  0%,
+  100% {
+    opacity: 0.2;
+    transform: scale(0.6);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.2);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #outcome .ribbon,
+  #outcome .sparkles i {
+    animation: none;
+  }
 }

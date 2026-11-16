@@ -1,5 +1,7 @@
 // Entry point: wires content, rules, undo history and the Babylon view to the DOM buttons.
 import './render/babylon-side-effects';
+import '@fontsource/baloo-2/latin-600.css';
+import '@fontsource/baloo-2/latin-800.css';
 import './style.css';
 import { Engine } from '@babylonjs/core/Engines/engine.pure';
 import { bundledFiles, bundledLevels } from './content/bundled';
@@ -13,6 +15,7 @@ import { attachInput } from './input/input';
 import { createGameView } from './render/game-view';
 import { hardwareScalingFor } from './render/render-quality';
 import { readSafeInsets } from './render/safe-insets';
+import { ICONS, type IconName } from './ui/icons';
 
 function element<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);
@@ -24,6 +27,26 @@ const canvas = element<HTMLCanvasElement>('scene');
 const statusText = element('status');
 const undoButton = element<HTMLButtonElement>('undo');
 const restartButton = element<HTMLButtonElement>('restart');
+const outcomePanel = element('outcome');
+const outcomeTitle = element('outcome-title');
+const againButton = element<HTMLButtonElement>('again');
+
+// Settings and Mute are inert until the settings and sound tickets (30, 31).
+for (const slot of document.querySelectorAll<HTMLElement>('[data-icon]')) {
+  slot.innerHTML = ICONS[slot.dataset.icon as IconName];
+}
+
+// The copy is a placeholder (UI visual style).
+const OUTCOME_COPY = {
+  won: { title: 'CAR STRIPPED!', button: 'Play again' },
+  lost: { title: 'OUT OF ROOM', button: 'Try again' },
+} as const;
+
+function showOutcome(outcome: 'won' | 'lost'): void {
+  outcomePanel.className = outcome;
+  outcomeTitle.textContent = OUTCOME_COPY[outcome].title;
+  againButton.textContent = OUTCOME_COPY[outcome].button;
+}
 
 // The game boots straight into the wooden-toy car. (tiny-cart-1 stays bundled as a test fixture.)
 // In dev mode a bad data file shows in the dev panel instead of crashing the page. Vite reloads
@@ -92,11 +115,13 @@ function show(): void {
   view.draw(history.present);
   statusText.textContent = STATUS[history.present.status];
   undoButton.disabled = !canUndo(history);
+  outcomePanel.className = 'hidden';
 }
 
 // Win and lose show only once everything has settled.
 view.onOutcome = (outcome) => {
   statusText.textContent = STATUS[outcome];
+  showOutcome(outcome);
 };
 
 function tapPin(pin: number): void {
@@ -126,10 +151,12 @@ undoButton.addEventListener('click', () => {
   history = undo(history);
   show();
 });
-restartButton.addEventListener('click', () => {
+function restart(): void {
   history = startHistory(start);
   show();
-});
+}
+restartButton.addEventListener('click', restart);
+againButton.addEventListener('click', restart);
 
 window.addEventListener('resize', () => {
   engine.setHardwareScalingLevel(hardwareScalingFor(window.devicePixelRatio));
