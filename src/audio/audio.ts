@@ -43,6 +43,8 @@ export interface GameAudio {
   tick(now: number): void;
   /** Drops every queued sound (Undo, Restart, Mute). */
   cancel(): void;
+  /** Drops every queued sound and stops the playing ones (Mute). */
+  silence(): void;
 }
 
 export function createAudio(options: AudioOptions): GameAudio {
@@ -68,6 +70,11 @@ export function createAudio(options: AudioOptions): GameAudio {
 
   function tick(now: number): void {
     if (pending.length === 0) return;
+    if (!options.enabled()) {
+      pending = [];
+      return;
+    }
+    if (!unlocked) return; // keep due cues until the first pointerup unlocks audio
     const due = pending.filter((c) => c.at <= now).sort((a, b) => a.at - b.at);
     if (due.length === 0) return;
     pending = pending.filter((c) => c.at > now);
@@ -94,6 +101,18 @@ export function createAudio(options: AudioOptions): GameAudio {
     tick,
     cancel() {
       pending = [];
+    },
+    silence() {
+      pending = [];
+      for (const list of voices.values()) {
+        for (const voice of list.splice(0)) {
+          try {
+            voice.stop();
+          } catch {
+            // Audio failed: stay silent.
+          }
+        }
+      }
     },
   };
 }

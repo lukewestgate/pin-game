@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { bundledLevels } from '../src/content/bundled';
 import { CAMERA, FEEDBACK } from '../src/input/constants';
 import { createGameView, type GameView } from '../src/render/game-view';
-import { initialState } from '../src/rules/rules';
+import { initialState, tap } from '../src/rules/rules';
 import { isBlocked } from '../src/rules/state';
 
 const W = 360;
@@ -23,12 +23,13 @@ const index = (id: string) => level.pinSockets.findIndex((s) => s.id === id);
 
 let current: { view: GameView; engine: NullEngine } | null = null;
 afterEach(() => {
+  INSETS.left = 0;
   current?.view.dispose();
   current?.engine.dispose();
   current = null;
 });
 
-function setup() {
+function setup(clock?: () => number) {
   const engine = new NullEngine({
     renderWidth: W,
     renderHeight: H,
@@ -36,12 +37,12 @@ function setup() {
     deterministicLockstep: false,
     lockstepMaxSteps: 1,
   });
-  const view = createGameView(engine, level, () => INSETS);
+  const view = createGameView(engine, level, () => INSETS, clock ? { clock } : {});
   current = { view, engine };
   view.draw(state);
   view.scene.render();
   const camera = view.scene.getCameraByName('model-camera') as ArcRotateCamera;
-  return { view, camera };
+  return { view, camera, engine };
 }
 
 describe('game view input support', () => {
@@ -101,8 +102,47 @@ describe('game view input support', () => {
     view.setZoom(0.1);
     expect(view.zoom).toBe(1);
     view.setZoom(1.5);
-    view.resize();
+    view.resize(() => state);
     expect(camera.radius).toBeCloseTo(r1 / 1.5, 6);
+  });
+
+  it('rebuilds the HUD at the new layout on resize, deferring while animations fly', () => {
+    let t = 0;
+    const { view } = setup(() => t);
+    const bufferX = () => view.scene.getMeshByName('buffer')?.position.x ?? 0;
+    const before = bufferX();
+    INSETS.left = 60; // the safe area changes, as on a rotation
+    view.resize(() => state);
+    expect(bufferX()).not.toBeCloseTo(before, 3);
+    // With a tap in flight the rebuild waits until the animation has settled.
+    const pin = index('roof-1');
+    const result = tap(level, state, pin);
+    view.play(result.events);
+    t = 10;
+    view.scene.render();
+    INSETS.left = 0;
+    view.resize(() => result.state);
+    expect(bufferX()).not.toBeCloseTo(before, 3);
+    t = 100000;
+    view.scene.render();
+    view.scene.render();
+    expect(bufferX()).toBeCloseTo(before, 3);
+  });
+
+  it('stops wiggling a Pin once it has been tapped and detached', () => {
+    const finalPosition = (wiggle: boolean) => {
+      let t = 0;
+      const { view } = setup(() => t);
+      const pin = index('roof-1');
+      if (wiggle) view.blockedTap(pin, state, 0);
+      view.play(tap(level, state, pin).events);
+      t = 100;
+      view.scene.render();
+      return view.scene.getMeshByName('pin-roof-1')?.position.clone() ?? Vector3.Zero();
+    };
+    const wiggled = finalPosition(true);
+    const plain = finalPosition(false);
+    expect(Vector3.Distance(wiggled, plain)).toBeLessThan(1e-6);
   });
 
   it('grows the pressed Pin and outlines it, until cleared', () => {

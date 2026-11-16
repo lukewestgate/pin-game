@@ -2,6 +2,7 @@
 // ray-check warnings, the solver panel, load errors and the optional next-Box forecast.
 // Loaded only in dev mode (see `mode.ts`). DOM and Babylon glue: the logic it shows lives in the
 // pure modules beside it, which carry the tests.
+import { projectionViewport } from './label-viewport';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial.pure';
 import { Color3 } from '@babylonjs/core/Maths/math.color.pure';
 import { Matrix, Vector3 } from '@babylonjs/core/Maths/math.vector.pure';
@@ -96,7 +97,7 @@ export function startDevViewer(options: DevViewerOptions): DevViewer {
       const w = engine.getRenderWidth(true);
       const h = engine.getRenderHeight(true);
       const k = game.canvas.clientWidth / w;
-      const viewport = camera.viewport.toGlobal(w, h);
+      const viewport = projectionViewport(camera.viewport, w, h);
       const transform = camera.getViewMatrix().multiply(camera.getProjectionMatrix());
       for (const label of labels) {
         const p = Vector3.Project(label.world(), Matrix.Identity(), transform, viewport);

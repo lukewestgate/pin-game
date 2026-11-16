@@ -125,8 +125,11 @@ export interface GameView {
   peekEnd(): void;
   /** The Part index being Peeked, if any. */
   peeking(): number | null;
-  /** Call after the canvas changes size. */
-  resize(): void;
+  /**
+   * Call after the canvas changes size. Rebuilds the HUD from `current()` once no animation is
+   * in flight (at once if none is).
+   */
+  resize(current: () => State): void;
   /** Colour-blind help: each colour gets its own Head mark. Changes only atlas indices. */
   setScrewShapes(on: boolean): void;
   dispose(): void;
@@ -421,6 +424,7 @@ export function createGameView(
   // The near-full warning follows the Buffer's count: amber rings, then a red pulse.
   let warningMeshes: Mesh[] = [];
   let pulse: { mesh: Mesh; material: StandardMaterial } | null = null;
+  let pulseMaterial: StandardMaterial | null = null; // one material, shared by every pulse ring
   function showWarning(): void {
     for (const mesh of warningMeshes) mesh.dispose();
     warningMeshes = [];
@@ -435,10 +439,13 @@ export function createGameView(
     if (warning.pulse !== null) {
       const ring = scaledRect(slotRect(warning.pulse), 1);
       const mesh = hudRounded(`buffer-pulse-${warning.pulse}`, ring, -0.7, UI.fail, ring.w * 0.25);
-      const material = new StandardMaterial(`pulse-${warning.pulse}`, scene);
-      material.disableLighting = true;
-      material.backFaceCulling = false;
-      material.emissiveColor = Color3.FromHexString(UI.fail);
+      if (!pulseMaterial) {
+        pulseMaterial = new StandardMaterial('pulse', scene);
+        pulseMaterial.disableLighting = true;
+        pulseMaterial.backFaceCulling = false;
+        pulseMaterial.emissiveColor = Color3.FromHexString(UI.fail);
+      }
+      const material = pulseMaterial;
       mesh.material = material;
       warningMeshes.push(mesh);
       pulse = { mesh, material };
@@ -460,6 +467,7 @@ export function createGameView(
   }));
   const partHomes = model.parts.map((node) => node.position.clone());
   let tasks: Task[] = [];
+  let rebuildHud: (() => State) | null = null; // a resize waiting for the animations to settle
   let tracks: Tracks = emptyTracks();
   let outcomeHandler: GameView['onOutcome'] = null;
   let stepsHandler: GameView['onSteps'] = null;
@@ -507,6 +515,7 @@ export function createGameView(
             t1: step.pullEnd,
             start: () => {
               // Leave the Part (which may fall) but keep the world pose.
+              wiggles.delete(step.pin); // the Pin is detached: its home no longer applies
               mesh.setParent(null);
               mesh.isPickable = false;
               from = mesh.position.clone();
@@ -673,6 +682,11 @@ export function createGameView(
   scene.onBeforeRenderObservable.add(() => {
     const now = clock();
     update(now);
+    if (rebuildHud && tasks.length === 0) {
+      const current = rebuildHud;
+      rebuildHud = null;
+      drawHud(current());
+    }
     animatePulse(now);
   });
 
@@ -688,6 +702,8 @@ export function createGameView(
 
   function draw(state: State): void {
     tasks = [];
+    rebuildHud = null;
+    wiggles.clear();
     tracks = emptyTracks();
     pinMeshes.forEach((mesh, i) => {
       const home = pinHomes[i];
@@ -929,7 +945,11 @@ export function createGameView(
       const pin: unknown = (hit.pickedMesh?.metadata as { pin?: unknown } | null)?.pin;
       return typeof pin === 'number' ? pin : null;
     },
-    resize: fitCameras,
+    resize(current) {
+      fitCameras();
+      if (tasks.length === 0) drawHud(current());
+      else rebuildHud = current;
+    },
     setScrewShapes(on) {
       screwShapes = on;
       pins.setScrewShapes(on);
