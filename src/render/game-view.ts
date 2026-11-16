@@ -33,6 +33,9 @@ import { UI } from './ui-colours';
 import { flashStrength, peekStep, perpendicular, wiggleOffset } from './pin-feedback';
 import { PIN_HEAD } from './pin-geometry';
 import { createPinFactory } from './pins';
+import { Constants } from '@babylonjs/core/Engines/constants';
+import { RawTexture } from '@babylonjs/core/Materials/Textures/rawTexture';
+import { MARK_CELLS, MARK_CELL_SIZE, holeMarkPixels, markIndexFor } from './head-mark-atlas';
 import { emptyTracks, schedule, type Step, type Timing, type Tracks } from './timeline';
 import {
   fitDistance,
@@ -66,6 +69,8 @@ export interface ViewOptions {
   /** The one animation speed multiplier. */
   speed?: number;
   timing?: Partial<Timing>;
+  /** Start with the colour-blind Head marks on. */
+  screwShapes?: boolean;
 }
 
 const PULL_DISTANCE = 0.5;
@@ -120,6 +125,8 @@ export interface GameView {
   peeking(): number | null;
   /** Call after the canvas changes size. */
   resize(): void;
+  /** Colour-blind help: each colour gets its own Head mark. Changes only atlas indices. */
+  setScrewShapes(on: boolean): void;
   dispose(): void;
 }
 
@@ -157,7 +164,8 @@ export function createGameView(
 
   // ---- Model and Pins ----
   const model = buildModel(scene, level.model, material);
-  const pins = createPinFactory(scene, model.root);
+  let screwShapes = options.screwShapes ?? false;
+  const pins = createPinFactory(scene, model.root, screwShapes);
   const pinSet = level.pinSockets.map((socket, i) => {
     const pin = level.pins[i];
     if (!pin) throw new Error(`Pin ${i} has no rules entry`);
@@ -165,6 +173,7 @@ export function createGameView(
       `pin-${socket.id}`,
       CANDY[pin.colour] ?? '#ffffff',
       model.parts[pin.part] ?? null,
+      pin.colour,
     );
     const dir = Vector3.FromArray(socket.direction).normalize();
     made.head.position = Vector3.FromArray(socket.position);
@@ -253,8 +262,9 @@ export function createGameView(
     y: number,
     diameter: number,
     hex: string,
+    colour: number,
   ): InstancedMesh {
-    const { head } = pins.create(name, hex, hudRoot);
+    const { head } = pins.create(name, hex, hudRoot, colour);
     head.layerMask = HUD_LAYER;
     for (const child of head.getChildMeshes()) child.layerMask = HUD_LAYER;
     head.isPickable = false;
@@ -266,9 +276,9 @@ export function createGameView(
 
   const centre = (r: Rect): { x: number; y: number } => ({ x: r.x + r.w / 2, y: r.y + r.h / 2 });
 
-  function hudPin(name: string, r: Rect, hex: string): InstancedMesh {
+  function hudPin(name: string, r: Rect, hex: string, colour: number): InstancedMesh {
     const c = centre(r);
-    return hudDisc(name, c.x, c.y, r.w * layout.pinHead, hex);
+    return hudDisc(name, c.x, c.y, r.w * layout.pinHead, hex, colour);
   }
 
   const tintOf = (colour: number | null): string =>
@@ -292,8 +302,55 @@ export function createGameView(
   }
 
   function addBoxPin(b: number, i: number, colour: number | null): InstancedMesh {
-    const mesh = hudPin(`box-${b}-pin-${i}`, holeRect(b, i), tintOf(colour));
+    const mesh = hudPin(`box-${b}-pin-${i}`, holeRect(b, i), tintOf(colour), colour ?? 0);
     mesh.parent = boxNodes[b] ?? hudRoot;
+    return mesh;
+  }
+
+  /** The faint drive in an empty hole: the atlas as black at 25%, one quad per hole. */
+  const holeMarkMaterial = (() => {
+    const texture = new RawTexture(
+      holeMarkPixels(),
+      MARK_CELLS * MARK_CELL_SIZE,
+      MARK_CELL_SIZE,
+      Constants.TEXTUREFORMAT_RGBA,
+      scene,
+      false,
+      false,
+      Constants.TEXTURE_BILINEAR_SAMPLINGMODE,
+    );
+    texture.hasAlpha = true;
+    texture.wrapU = Constants.TEXTURE_CLAMP_ADDRESSMODE;
+    texture.wrapV = Constants.TEXTURE_CLAMP_ADDRESSMODE;
+    const mat = new StandardMaterial('hole-mark', scene);
+    mat.disableLighting = true;
+    mat.backFaceCulling = false;
+    mat.emissiveColor = Color3.Black();
+    mat.diffuseTexture = texture;
+    mat.useAlphaFromDiffuseTexture = true;
+    return mat;
+  })();
+
+  function holeMark(name: string, hole: Rect, colour: number): Mesh {
+    const size = hole.w * layout.pinHead;
+    const h = size / 2;
+    const cell = markIndexFor(colour, true);
+    const u0 = cell / MARK_CELLS;
+    const u1 = (cell + 1) / MARK_CELLS;
+    const mesh = new Mesh(name, scene);
+    const vertexData = new VertexData();
+    vertexData.positions = [-h, -h, 0, h, -h, 0, h, h, 0, -h, h, 0];
+    vertexData.indices = [0, 2, 1, 0, 3, 2];
+    vertexData.normals = [0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1];
+    // Row 0 of the atlas is v = 0 at the top of the cell; the quad's top edge is +y.
+    vertexData.uvs = [u0, 1, u1, 1, u1, 0, u0, 0];
+    vertexData.applyToMesh(mesh);
+    mesh.layerMask = HUD_LAYER;
+    mesh.isPickable = false;
+    mesh.material = holeMarkMaterial;
+    const c = centre(hole);
+    mesh.position = new Vector3(c.x, -c.y, -1.2);
+    mesh.setEnabled(screwShapes);
     return mesh;
   }
 
@@ -329,6 +386,7 @@ export function createGameView(
         h: recess.h * (1 - HOLE_SHADOW),
       };
       hudRounded(`box-${b}-floor-${i}`, floor, -1.5, scaled(tint, 0.42), radius).parent = node;
+      if (colour !== null) holeMark(`box-${b}-mark-${i}`, hole, colour).parent = node;
       if (i < fill) addBoxPin(b, i, colour);
     });
     return node;
@@ -353,7 +411,7 @@ export function createGameView(
       hudRounded(`buffer-slot-${i}`, inner, -1, UI.bufferSlot, inner.w * 0.25);
       const colour = state.buffer[i];
       if (colour !== undefined)
-        bufferPins[i] = hudPin(`buffer-pin-${i}`, slot, CANDY[colour] ?? '#ffffff');
+        bufferPins[i] = hudPin(`buffer-pin-${i}`, slot, CANDY[colour] ?? '#ffffff', colour);
     });
     showWarning();
   }
@@ -463,7 +521,7 @@ export function createGameView(
               pinSet[step.pin]?.setShank(null);
               mesh.setEnabled(false);
               origin = toScreen(mesh.position);
-              disc = hudDisc(`fly-${flyCount++}`, origin.x, origin.y, 1, hex);
+              disc = hudDisc(`fly-${flyCount++}`, origin.x, origin.y, 1, hex, colour);
             },
             tick: (p) => {
               if (!disc) return;
@@ -478,7 +536,12 @@ export function createGameView(
               disc?.dispose();
               if (step.kind === 'pinToBox') addBoxPin(step.box, step.fill - 1, colour);
               else
-                bufferPins[step.slot] = hudPin(`buffer-pin-${step.slot}`, slotRect(step.slot), hex);
+                bufferPins[step.slot] = hudPin(
+                  `buffer-pin-${step.slot}`,
+                  slotRect(step.slot),
+                  hex,
+                  colour,
+                );
               showWarning();
             },
           },
@@ -857,6 +920,13 @@ export function createGameView(
       return typeof pin === 'number' ? pin : null;
     },
     resize: fitCameras,
+    setScrewShapes(on) {
+      screwShapes = on;
+      pins.setScrewShapes(on);
+      for (const mesh of scene.meshes) {
+        if (/^box-\d+-mark-\d+$/.test(mesh.name)) mesh.setEnabled(on);
+      }
+    },
     dispose: () => scene.dispose(),
   };
 }

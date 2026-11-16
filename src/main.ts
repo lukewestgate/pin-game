@@ -15,6 +15,7 @@ import { attachInput } from './input/input';
 import { createGameView } from './render/game-view';
 import { hardwareScalingFor } from './render/render-quality';
 import { readSafeInsets } from './render/safe-insets';
+import { browserStorage, createSettingsStore } from './settings/store';
 import { ICONS, type IconName } from './ui/icons';
 
 function element<T extends HTMLElement>(id: string): T {
@@ -31,7 +32,7 @@ const outcomePanel = element('outcome');
 const outcomeTitle = element('outcome-title');
 const againButton = element<HTMLButtonElement>('again');
 
-// Settings and Mute are inert until the settings and sound tickets (30, 31).
+// Mute stays inert until the sound ticket (31); Settings opens the sheet below.
 for (const slot of document.querySelectorAll<HTMLElement>('[data-icon]')) {
   slot.innerHTML = ICONS[slot.dataset.icon as IconName];
 }
@@ -74,7 +75,10 @@ const engine = new Engine(
 );
 // 4x MSAA from the context's `antialias`, and the pixel ratio capped at about 2.
 engine.setHardwareScalingLevel(hardwareScalingFor(window.devicePixelRatio));
-const view = createGameView(engine, level, readSafeInsets);
+const settings = createSettingsStore(browserStorage());
+const view = createGameView(engine, level, readSafeInsets, {
+  screwShapes: settings.get('screwShapes'),
+});
 const bar = element('bar');
 
 /** Puts the DOM bottom bar where the layout says. */
@@ -87,7 +91,35 @@ function placeBar(): void {
     height: `${r.h}px`,
   });
 }
+
+// The settings sheet opens above the Settings button, right-aligned to it.
+const sheet = element('settings-sheet');
+const settingsButton = element<HTMLButtonElement>('settings');
+const soundSwitch = element<HTMLInputElement>('setting-sound');
+const shapesSwitch = element<HTMLInputElement>('setting-screw-shapes');
+function placeSheet(): void {
+  const b = settingsButton.getBoundingClientRect();
+  sheet.style.bottom = `${window.innerHeight - b.top + 10}px`;
+  sheet.style.right = `${Math.max(8, window.innerWidth - b.right)}px`;
+}
+function syncSwitches(): void {
+  soundSwitch.checked = settings.get('sound');
+  shapesSwitch.checked = settings.get('screwShapes');
+}
+settingsButton.addEventListener('click', () => {
+  sheet.classList.toggle('hidden');
+  placeSheet();
+});
+soundSwitch.addEventListener('change', () => settings.set('sound', soundSwitch.checked));
+shapesSwitch.addEventListener('change', () => settings.set('screwShapes', shapesSwitch.checked));
+settings.subscribe((key, value) => {
+  if (key === 'screwShapes') view.setScrewShapes(value);
+  syncSwitches();
+});
+canvas.addEventListener('pointerdown', () => sheet.classList.add('hidden'));
+syncSwitches();
 placeBar();
+placeSheet();
 
 const start = initialState(level).state;
 let history: History<State> = startHistory(start);
@@ -163,6 +195,7 @@ window.addEventListener('resize', () => {
   engine.resize();
   view.resize();
   placeBar();
+  placeSheet();
 });
 
 show();

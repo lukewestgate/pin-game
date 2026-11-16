@@ -274,3 +274,65 @@ body {
     animation: none;
   }
 }
+
+/* The settings sheet: opens above the Settings button, with room for more rows. */
+#settings-sheet {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: min(280px, calc(100vw - 16px));
+  box-sizing: border-box;
+  padding: 10px 14px;
+  border-radius: 16px;
+  background: var(--slate);
+  box-shadow: 0 4px 0 var(--slate-edge);
+  z-index: 5;
+}
+
+#settings-sheet.hidden {
+  display: none;
+}
+
+.switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+  font-size: 17px;
+  cursor: pointer;
+}
+
+.switch-row input[type='checkbox'] {
+  appearance: none;
+  flex: none;
+  position: relative;
+  width: 48px;
+  height: 28px;
+  margin: 0;
+  border-radius: 14px;
+  background: #0006;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.switch-row input[type='checkbox']::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s;
+}
+
+.switch-row input[type='checkbox']:checked {
+  background: var(--teal);
+}
+
+.switch-row input[type='checkbox']:checked::after {
+  transform: translateX(20px);
+}
