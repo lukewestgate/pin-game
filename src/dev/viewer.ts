@@ -41,7 +41,7 @@ function el<K extends keyof HTMLElementTagNameMap>(
 
 export function startDevViewer(options: DevViewerOptions): DevViewer {
   const panel = el('details', { id: 'dev-panel', open: true });
-  panel.append(el('summary', {}, 'Dev viewer'));
+  panel.append(el('summary', {}, `Dev viewer · build ${__APP_VERSION__}`));
   document.body.append(panel);
 
   const errorList = el('ul', { className: 'dev-errors' });
