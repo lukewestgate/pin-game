@@ -2,6 +2,7 @@
 // ray-check warnings, the solver panel, load errors and the optional next-Box forecast.
 // Loaded only in dev mode (see `mode.ts`). DOM and Babylon glue: the logic it shows lives in the
 // pure modules beside it, which carry the tests.
+import { SceneInstrumentation } from '@babylonjs/core/Instrumentation/sceneInstrumentation';
 import { projectionViewport } from './label-viewport';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial.pure';
 import { Color3 } from '@babylonjs/core/Maths/math.color.pure';
@@ -54,10 +55,21 @@ export function startDevViewer(options: DevViewerOptions): DevViewer {
   if (!game) return { update: () => undefined };
   const { level, scene } = game;
 
-  // Frame rate, for judging render quality settings on a device.
+  // Frame rate and where the time goes, for judging render settings on a device. If CPU render
+  // time is far under the frame time, the GPU is the limit (pixels), else the CPU (draw calls).
+  const instrumentation = new SceneInstrumentation(scene);
+  instrumentation.captureFrameTime = true;
+  instrumentation.captureRenderTime = true;
+  instrumentation.captureActiveMeshesEvaluationTime = true;
   setInterval(() => {
     const engine = scene.getEngine();
-    summary.textContent = `Dev viewer · build ${__APP_VERSION__} · ${engine.getFps().toFixed(0)} fps · ${engine.getRenderWidth()}x${engine.getRenderHeight()}`;
+    const ms = (c: { average: number }) => c.average.toFixed(1);
+    summary.textContent =
+      `Dev viewer · build ${__APP_VERSION__} · ${engine.getFps().toFixed(0)} fps · ` +
+      `${engine.getRenderWidth()}x${engine.getRenderHeight()} · ` +
+      `frame ${ms(instrumentation.frameTimeCounter)} ms (render ${ms(instrumentation.renderTimeCounter)}, ` +
+      `meshes ${ms(instrumentation.activeMeshesEvaluationTimeCounter)}) · ` +
+      `${instrumentation.drawCallsCounter.current} draws · ${scene.getActiveMeshes().length} meshes`;
   }, 500);
 
   // ---- Ray-check warnings ----
@@ -92,8 +104,10 @@ export function startDevViewer(options: DevViewerOptions): DevViewer {
       });
     }
   }
-  const labelsBox = el('input', { type: 'checkbox', checked: true });
-  labelLayer.hidden = false;
+  const labelsBox = el('input', { type: 'checkbox', checked: false });
+  // Off by default: moving ~60 DOM labels every frame costs real frame time on a phone, which
+  // would skew the fps readout the panel is also there to give.
+  labelLayer.hidden = true;
   labelsBox.onchange = () => (labelLayer.hidden = !labelsBox.checked);
   panel.append(el('label', {}, labelsBox, ' Part and Socket ids'));
 
