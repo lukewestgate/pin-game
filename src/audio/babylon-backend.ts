@@ -23,6 +23,8 @@ interface Slot {
   busy: boolean;
   /** Bumped per play, so a stale Voice cannot cut a newer one. */
   generation: number;
+  /** Ended events still owed by our own `stop()` calls; they must not clear `busy`. */
+  expectedEnds: number;
 }
 
 export function createBabylonBackend(): AudioBackend {
@@ -43,11 +45,22 @@ export function createBabylonBackend(): AudioBackend {
       SOUND_NAMES.map(async (name) => {
         if (!engine) return;
         const first = await engine.createSoundAsync(name, URLS[name]);
-        const slots: Slot[] = [{ sound: first, busy: false, generation: 0 }];
+        const slots: Slot[] = [{ sound: first, busy: false, generation: 0, expectedEnds: 0 }];
         for (let i = 1; i < VOICE_CAP; i++) {
-          slots.push({ sound: await first.cloneAsync(), busy: false, generation: 0 });
+          slots.push({
+            sound: await first.cloneAsync(),
+            busy: false,
+            generation: 0,
+            expectedEnds: 0,
+          });
         }
-        for (const slot of slots) slot.sound.onEndedObservable.add(() => (slot.busy = false));
+        for (const slot of slots) {
+          slot.sound.onEndedObservable.add(() => {
+            // An ended event caused by our own stop() must not free a voice restarted since.
+            if (slot.expectedEnds > 0) slot.expectedEnds--;
+            else slot.busy = false;
+          });
+        }
         pools.set(name, slots);
       }),
     );
@@ -64,6 +77,7 @@ export function createBabylonBackend(): AudioBackend {
       if (!slots) return null;
       const slot = slots.find((s) => !s.busy) ?? slots[0];
       if (!slot) return null;
+      if (slot.busy) slot.expectedEnds++;
       slot.sound.stop();
       slot.sound.playbackRate = rate;
       slot.sound.play({ volume });
@@ -71,7 +85,8 @@ export function createBabylonBackend(): AudioBackend {
       const generation = ++slot.generation;
       return {
         stop() {
-          if (slot.generation !== generation) return;
+          if (slot.generation !== generation || !slot.busy) return;
+          slot.expectedEnds++;
           slot.sound.stop();
           slot.busy = false;
         },

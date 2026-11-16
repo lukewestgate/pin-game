@@ -58,6 +58,25 @@ describe('createAudio', () => {
     expect(fake.played).toEqual([]);
   });
 
+  it('keeps due sounds pending while locked and plays them once unlocked', async () => {
+    const fake = fakeBackend();
+    const audio = createAudio({ backend: fake.backend, enabled: () => true, random: () => 0.5 });
+    audio.schedule([box(1, 0)], 0);
+    audio.tick(50);
+    expect(fake.played).toEqual([]);
+    await audio.unlock();
+    audio.tick(60);
+    expect(fake.played.map((p) => p.sound)).toEqual(['pop']);
+  });
+
+  it('silence stops playing voices and drops pending sounds', async () => {
+    const { audio, played } = await unlocked();
+    audio.schedule([box(1, 0)], 0);
+    audio.silence();
+    audio.tick(1000);
+    expect(played.map((p) => [p.sound, p.stopped])).toEqual([['pop', true]]);
+  });
+
   it('plays the pop at tap time and the click at the step end', async () => {
     const { audio, played } = await unlocked();
     audio.schedule([box(1, 0)], 0);

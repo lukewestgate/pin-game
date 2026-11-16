@@ -30,6 +30,7 @@ export function playouts(level: Level, options: PlayoutOptions = {}): PlayoutRes
     let st = start;
     while (st.status === 'playing') {
       const legal = legalTaps(level, st);
+      if (legal.length === 0) break; // deadlock (e.g. cyclic coveredBy): counts as a loss
       st = tap(level, st, legal[Math.floor(r() * legal.length)] as number).state;
     }
     if (st.status === 'won') wins++;

@@ -39,8 +39,10 @@ export function attachInput(canvas: HTMLCanvasElement, host: InputHost): Input {
     const r = host.modelRegion();
     return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
   };
-  const pick = (x: number, y: number) =>
-    inRegion(x, y) ? pickPin(x, y, host.candidates(), PICK) : { id: null, how: 'miss' as const };
+  const pick = (x: number, y: number, candidates: PinCandidate[] | null = null) =>
+    inRegion(x, y)
+      ? pickPin(x, y, candidates ?? host.candidates(), PICK)
+      : { id: null, how: 'miss' as const };
 
   function handle(intent: Intent): void {
     switch (intent.type) {
@@ -52,9 +54,11 @@ export function attachInput(canvas: HTMLCanvasElement, host: InputHost): Input {
         break;
       case 'tap': {
         host.highlight(null);
-        const { id } = pick(intent.x, intent.y);
+        // Projecting every Pin is costly, so a tap computes the candidates once.
+        const candidates = inRegion(intent.x, intent.y) ? host.candidates() : [];
+        const { id } = pick(intent.x, intent.y, candidates);
         if (id === null) break;
-        if (host.candidates().find((c) => c.id === id)?.blocked) {
+        if (candidates.find((c) => c.id === id)?.blocked) {
           host.blockedTap(id);
           navigator.vibrate?.(FEEDBACK.vibrateBlockedMs);
         } else host.tapPin(id);

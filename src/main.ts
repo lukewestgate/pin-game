@@ -130,7 +130,7 @@ soundSwitch.addEventListener('change', () => settings.set('sound', soundSwitch.c
 shapesSwitch.addEventListener('change', () => settings.set('screwShapes', shapesSwitch.checked));
 settings.subscribe((key, value) => {
   if (key === 'screwShapes') view.setScrewShapes(value);
-  if (key === 'sound' && !value) audio.cancel();
+  if (key === 'sound' && !value) audio.silence();
   syncSwitches();
 });
 canvas.addEventListener('pointerdown', () => sheet.classList.add('hidden'));
@@ -226,7 +226,7 @@ againButton.addEventListener('click', restart);
 window.addEventListener('resize', () => {
   engine.setHardwareScalingLevel(hardwareScalingFor(window.devicePixelRatio));
   engine.resize();
-  view.resize();
+  view.resize(() => history.present);
   placeBar();
   placeSheet();
 });
