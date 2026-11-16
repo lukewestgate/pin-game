@@ -11,11 +11,11 @@ import type { DevViewer } from './dev/viewer';
 import { canUndo, commit, startHistory, undo, type History } from './rules/history';
 import { initialState, tap } from './rules/rules';
 import type { State } from './rules/state';
+import { attachInput } from './input/input';
 import { createGameView } from './render/game-view';
+import { hardwareScalingFor } from './render/render-quality';
 import { readSafeInsets } from './render/safe-insets';
 import { ICONS, type IconName } from './ui/icons';
-
-const TAP_SLOP_PX = 6;
 
 function element<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);
@@ -70,8 +70,10 @@ const engine = new Engine(
   canvas,
   true,
   { alpha: true, premultipliedAlpha: false, stencil: true },
-  true,
+  false,
 );
+// 4x MSAA from the context's `antialias`, and the pixel ratio capped at about 2.
+engine.setHardwareScalingLevel(hardwareScalingFor(window.devicePixelRatio));
 const view = createGameView(engine, level, readSafeInsets);
 const bar = element('bar');
 
@@ -132,21 +134,16 @@ function tapPin(pin: number): void {
   undoButton.disabled = !canUndo(history);
 }
 
-let press: { id: number; x: number; y: number } | null = null;
-canvas.addEventListener('pointerdown', (e) => {
-  if (e.button === 0) press = { id: e.pointerId, x: e.offsetX, y: e.offsetY };
+const input = attachInput(canvas, {
+  modelRegion: () => view.layout.model,
+  candidates: () => view.candidates(history.present),
+  zoom: () => view.zoom,
+  setZoom: (z) => view.setZoom(z),
+  turn: (dx, dy) => view.turn(dx, dy),
+  highlight: (pin) => view.highlight(pin),
+  tapPin,
+  blockedTap: (pin) => view.blockedTap(pin, history.present, performance.now()),
 });
-canvas.addEventListener('pointerup', (e) => {
-  if (!press || press.id !== e.pointerId) return;
-  const moved = Math.hypot(e.offsetX - press.x, e.offsetY - press.y);
-  const { x, y } = press;
-  press = null;
-  if (moved > TAP_SLOP_PX) return;
-  const pin = view.pinAt(x, y);
-  if (pin !== null) tapPin(pin);
-});
-canvas.addEventListener('pointercancel', () => (press = null));
-canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
 undoButton.addEventListener('click', () => {
   history = undo(history);
@@ -160,10 +157,14 @@ restartButton.addEventListener('click', restart);
 againButton.addEventListener('click', restart);
 
 window.addEventListener('resize', () => {
+  engine.setHardwareScalingLevel(hardwareScalingFor(window.devicePixelRatio));
   engine.resize();
   view.resize();
   placeBar();
 });
 
 show();
-engine.runRenderLoop(() => view.scene.render());
+engine.runRenderLoop(() => {
+  input.tick(performance.now());
+  view.scene.render();
+});

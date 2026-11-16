@@ -6,3 +6,5 @@ import '@babylonjs/core/scene';
 import '@babylonjs/core/Materials/standardMaterial';
 import '@babylonjs/core/Engines/Extensions/engine.rawTexture'; // the wood grain texture
 import '@babylonjs/core/Culling/ray'; // scene.pick
+import '@babylonjs/core/Rendering/outlineRenderer'; // Pin press outline and Part red flash
+import '@babylonjs/core/Meshes/instancedMesh'; // Pins are instances of one head mesh
