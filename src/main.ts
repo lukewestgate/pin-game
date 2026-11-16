@@ -15,7 +15,7 @@ import { attachInput } from './input/input';
 import { createAudio } from './audio/audio';
 import { createBabylonBackend } from './audio/babylon-backend';
 import { createGameView } from './render/game-view';
-import { hardwareScalingFor } from './render/render-quality';
+import { hardwareScalingFor, qualityFromSearch } from './render/render-quality';
 import { readSafeInsets } from './render/safe-insets';
 import { browserStorage, createSettingsStore } from './settings/store';
 import { ICONS, type IconName } from './ui/icons';
@@ -70,14 +70,15 @@ if (!carLevel) {
 const level = carLevel;
 
 // WebGL2 engine (Babylon falls back to WebGL1 only where WebGL2 is missing).
+const quality = qualityFromSearch(location.search);
 const engine = new Engine(
   canvas,
-  true,
+  quality.antialias,
   { alpha: true, premultipliedAlpha: false, stencil: true },
   false,
 );
 // 4x MSAA from the context's `antialias`, and the pixel ratio capped at about 2.
-engine.setHardwareScalingLevel(hardwareScalingFor(window.devicePixelRatio));
+engine.setHardwareScalingLevel(hardwareScalingFor(window.devicePixelRatio, quality.maxPixelRatio));
 const settings = createSettingsStore(browserStorage());
 const view = createGameView(engine, level, readSafeInsets, {
   screwShapes: settings.get('screwShapes'),
@@ -224,7 +225,9 @@ restartButton.addEventListener('click', restart);
 againButton.addEventListener('click', restart);
 
 window.addEventListener('resize', () => {
-  engine.setHardwareScalingLevel(hardwareScalingFor(window.devicePixelRatio));
+  engine.setHardwareScalingLevel(
+    hardwareScalingFor(window.devicePixelRatio, quality.maxPixelRatio),
+  );
   engine.resize();
   view.resize(() => history.present);
   placeBar();

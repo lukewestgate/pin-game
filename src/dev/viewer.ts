@@ -42,7 +42,8 @@ function el<K extends keyof HTMLElementTagNameMap>(
 
 export function startDevViewer(options: DevViewerOptions): DevViewer {
   const panel = el('details', { id: 'dev-panel', open: true });
-  panel.append(el('summary', {}, `Dev viewer · build ${__APP_VERSION__}`));
+  const summary = el('summary', {}, `Dev viewer · build ${__APP_VERSION__}`);
+  panel.append(summary);
   document.body.append(panel);
 
   const errorList = el('ul', { className: 'dev-errors' });
@@ -52,6 +53,12 @@ export function startDevViewer(options: DevViewerOptions): DevViewer {
   const game = options.game;
   if (!game) return { update: () => undefined };
   const { level, scene } = game;
+
+  // Frame rate, for judging render quality settings on a device.
+  setInterval(() => {
+    const engine = scene.getEngine();
+    summary.textContent = `Dev viewer · build ${__APP_VERSION__} · ${engine.getFps().toFixed(0)} fps · ${engine.getRenderWidth()}x${engine.getRenderHeight()}`;
+  }, 500);
 
   // ---- Ray-check warnings ----
   const warnings = rayCheck(level.model);

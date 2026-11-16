@@ -229,3 +229,12 @@ describe('render quality', () => {
     expect(hardwareScalingFor(0)).toBe(1);
   });
 });
+
+describe('quality overrides', () => {
+  it('reads ?dpr and ?aa for trying settings on a device', async () => {
+    const { qualityFromSearch } = await import('../src/render/render-quality');
+    expect(qualityFromSearch('')).toEqual({ maxPixelRatio: 2, antialias: true });
+    expect(qualityFromSearch('?dpr=1&aa=0')).toEqual({ maxPixelRatio: 1, antialias: false });
+    expect(hardwareScalingFor(3, 1.5)).toBeCloseTo(1 / 1.5, 10);
+  });
+});
