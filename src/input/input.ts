@@ -21,6 +21,8 @@ export interface InputHost {
   tapPin(pin: number): void;
   /** A tap on a Blocked Pin. */
   blockedTap(pin: number): void;
+  /** Every pointerup, including a drag's end, before the gesture is handled (audio unlock). */
+  pointerUp(): void;
 }
 
 export interface Input {
@@ -106,7 +108,10 @@ export function attachInput(canvas: HTMLCanvasElement, host: InputHost): Input {
     feed('down', e);
   };
   const onMove = (e: PointerEvent) => feed('move', e);
-  const onUp = (e: PointerEvent) => feed('up', e);
+  const onUp = (e: PointerEvent) => {
+    host.pointerUp();
+    feed('up', e);
+  };
   const onCancel = (e: PointerEvent) => feed('cancel', e);
   const onWheel = (e: WheelEvent) => {
     e.preventDefault();

@@ -97,6 +97,8 @@ export interface GameView {
   draw(state: State): void;
   /** Animates one tap's rules events now. The rules state has already moved on. */
   play(events: readonly RulesEvent[]): void;
+  /** Called with each tap's freshly scheduled steps (the audio module listens here). */
+  onSteps: ((steps: readonly Step[]) => void) | null;
   /** Called when a won or lost step is reached, after everything has settled. */
   onOutcome: ((outcome: 'won' | 'lost') => void) | null;
   /** The Pin under a point in CSS px relative to the canvas, if any. */
@@ -460,6 +462,7 @@ export function createGameView(
   let tasks: Task[] = [];
   let tracks: Tracks = emptyTracks();
   let outcomeHandler: GameView['onOutcome'] = null;
+  let stepsHandler: GameView['onSteps'] = null;
 
   /** A world point as CSS px, through the Model camera and its viewport. */
   function toScreen(world: Vector3): { x: number; y: number } {
@@ -680,6 +683,7 @@ export function createGameView(
     });
     tracks = result.tracks;
     for (const step of result.steps) tasks.push(...tasksFor(step));
+    stepsHandler?.(result.steps);
   }
 
   function draw(state: State): void {
@@ -898,6 +902,12 @@ export function createGameView(
     peekEnd,
     peeking: () => peeked,
     play,
+    get onSteps() {
+      return stepsHandler;
+    },
+    set onSteps(fn) {
+      stepsHandler = fn;
+    },
     get onOutcome() {
       return outcomeHandler;
     },

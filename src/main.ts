@@ -12,6 +12,8 @@ import { canUndo, commit, startHistory, undo, type History } from './rules/histo
 import { initialState, tap } from './rules/rules';
 import type { State } from './rules/state';
 import { attachInput } from './input/input';
+import { createAudio } from './audio/audio';
+import { createBabylonBackend } from './audio/babylon-backend';
 import { createGameView } from './render/game-view';
 import { hardwareScalingFor } from './render/render-quality';
 import { readSafeInsets } from './render/safe-insets';
@@ -33,7 +35,6 @@ const outcomePanel = element('outcome');
 const outcomeTitle = element('outcome-title');
 const againButton = element<HTMLButtonElement>('again');
 
-// Mute stays inert until the sound ticket (31); Settings opens the sheet below.
 for (const slot of document.querySelectorAll<HTMLElement>('[data-icon]')) {
   slot.innerHTML = ICONS[slot.dataset.icon as IconName];
 }
@@ -83,6 +84,13 @@ const view = createGameView(engine, level, readSafeInsets, {
 });
 const bar = element('bar');
 
+// Sound: scheduled Timeline steps play at their start times. If audio fails, nothing else changes.
+const audio = createAudio({
+  backend: createBabylonBackend(),
+  enabled: () => settings.get('sound'),
+});
+view.onSteps = (steps) => audio.schedule(steps, performance.now());
+
 /** Puts the DOM bottom bar where the layout says. */
 function placeBar(): void {
   const r = view.layout.bottomBar;
@@ -104,18 +112,25 @@ function placeSheet(): void {
   sheet.style.bottom = `${window.innerHeight - b.top + 10}px`;
   sheet.style.right = `${Math.max(8, window.innerWidth - b.right)}px`;
 }
+const muteButton = element<HTMLButtonElement>('mute');
 function syncSwitches(): void {
-  soundSwitch.checked = settings.get('sound');
+  const on = settings.get('sound');
+  soundSwitch.checked = on;
+  muteButton.setAttribute('aria-pressed', String(!on));
+  const icon = muteButton.querySelector<HTMLElement>('[data-icon]');
+  if (icon) icon.innerHTML = ICONS[on ? 'soundOn' : 'soundOff'];
   shapesSwitch.checked = settings.get('screwShapes');
 }
 settingsButton.addEventListener('click', () => {
   sheet.classList.toggle('hidden');
   placeSheet();
 });
+muteButton.addEventListener('click', () => settings.set('sound', !settings.get('sound')));
 soundSwitch.addEventListener('change', () => settings.set('sound', soundSwitch.checked));
 shapesSwitch.addEventListener('change', () => settings.set('screwShapes', shapesSwitch.checked));
 settings.subscribe((key, value) => {
   if (key === 'screwShapes') view.setScrewShapes(value);
+  if (key === 'sound' && !value) audio.cancel();
   syncSwitches();
 });
 canvas.addEventListener('pointerdown', () => sheet.classList.add('hidden'));
@@ -188,14 +203,20 @@ const input = attachInput(canvas, {
   peekAt: (x, y, pin) => view.peekAt(x, y, pin, performance.now()),
   peekEnd: () => view.peekEnd(),
   tapPin,
-  blockedTap: (pin) => view.blockedTap(pin, history.present, performance.now()),
+  blockedTap: (pin) => {
+    view.blockedTap(pin, history.present, performance.now());
+    audio.blocked(performance.now());
+  },
+  pointerUp: () => void audio.unlock(),
 });
 
 undoButton.addEventListener('click', () => {
+  audio.cancel();
   history = undo(history);
   show();
 });
 function restart(): void {
+  audio.cancel();
   history = startHistory(start);
   show();
 }
@@ -213,5 +234,6 @@ window.addEventListener('resize', () => {
 show();
 engine.runRenderLoop(() => {
   input.tick(performance.now());
+  audio.tick(performance.now());
   view.scene.render();
 });
