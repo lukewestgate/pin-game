@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately).
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] One package with pnpm (pinned via `packageManager`), Vite, strict TypeScript with `noUncheckedIndexedAccess`, ESLint (typescript-eslint), Prettier and Vitest. Node pinned in `.nvmrc` and `engines` (20.19 or later; 24 LTS is fine).
 - [x] ESLint forbids Babylon and DOM imports in the rules, solver and content modules, and a deliberate violation fails lint.

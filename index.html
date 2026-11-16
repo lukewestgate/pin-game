@@ -3,14 +3,53 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#34505b" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Pin Game" />
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon-180x180.png" />
     <title>Pin Game</title>
   </head>
   <body>
     <canvas id="scene"></canvas>
+    <div id="safe-probe" aria-hidden="true"></div>
     <p id="status" aria-live="polite"></p>
     <div id="bar">
-      <button id="undo" type="button" class="dev">Undo <small>DEV</small></button>
-      <button id="restart" type="button">Restart</button>
+      <button id="undo" type="button" class="pill dev">
+        <span data-icon="undo"></span>Undo <small>DEV</small>
+      </button>
+      <span class="spacer"></span>
+      <button id="settings" type="button" class="pill icon" aria-label="Settings">
+        <span data-icon="settings"></span>
+      </button>
+      <button id="mute" type="button" class="pill icon" aria-label="Mute">
+        <span data-icon="soundOn"></span>
+      </button>
+      <button id="restart" type="button" class="pill restart">
+        <span data-icon="restart"></span>Restart
+      </button>
+    </div>
+    <div id="settings-sheet" class="hidden" role="dialog" aria-label="Settings">
+      <label class="switch-row">
+        <span>Sound</span>
+        <input id="setting-sound" type="checkbox" role="switch" />
+      </label>
+      <label class="switch-row">
+        <span>Screw shapes (colour-blind help)</span>
+        <input id="setting-screw-shapes" type="checkbox" role="switch" />
+      </label>
+    </div>
+    <div id="outcome" class="hidden" role="dialog" aria-labelledby="outcome-title">
+      <div class="ribbon">
+        <div class="sparkles" aria-hidden="true">
+          <i>✦</i><i>✦</i><i>✦</i><i>✦</i><i>✦</i><i>✦</i>
+        </div>
+        <h1 id="outcome-title"></h1>
+        <span class="stitch"></span>
+      </div>
+      <button id="again" type="button" class="pill go"></button>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
