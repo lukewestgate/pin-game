@@ -11,6 +11,7 @@ import { initialState, tap } from './rules/rules';
 import type { State } from './rules/state';
 import { attachInput } from './input/input';
 import { createGameView } from './render/game-view';
+import { hardwareScalingFor } from './render/render-quality';
 import { readSafeInsets } from './render/safe-insets';
 
 function element<T extends HTMLElement>(id: string): T {
@@ -46,8 +47,10 @@ const engine = new Engine(
   canvas,
   true,
   { alpha: true, premultipliedAlpha: false, stencil: true },
-  true,
+  false,
 );
+// 4x MSAA from the context's `antialias`, and the pixel ratio capped at about 2.
+engine.setHardwareScalingLevel(hardwareScalingFor(window.devicePixelRatio));
 const view = createGameView(engine, level, readSafeInsets);
 const bar = element('bar');
 
@@ -127,6 +130,7 @@ restartButton.addEventListener('click', () => {
 });
 
 window.addEventListener('resize', () => {
+  engine.setHardwareScalingLevel(hardwareScalingFor(window.devicePixelRatio));
   engine.resize();
   view.resize();
   placeBar();

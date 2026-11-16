@@ -19,13 +19,15 @@ import { Color3, Color4 } from '@babylonjs/core/Maths/math.color.pure';
 import { Matrix, Quaternion, Vector3 } from '@babylonjs/core/Maths/math.vector.pure';
 import { Viewport } from '@babylonjs/core/Maths/math.viewport';
 import { Ray } from '@babylonjs/core/Culling/ray.pure';
-import { CreateCylinder } from '@babylonjs/core/Meshes/Builders/cylinderBuilder.pure';
+import type { InstancedMesh } from '@babylonjs/core/Meshes/instancedMesh.pure';
 import { CreatePlane } from '@babylonjs/core/Meshes/Builders/planeBuilder.pure';
 import { Mesh } from '@babylonjs/core/Meshes/mesh.pure';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode.pure';
 import { Scene } from '@babylonjs/core/scene.pure';
 import { PIN, buildModel, materialCache } from './model-scene';
 import { flashStrength, perpendicular, wiggleOffset } from './pin-feedback';
+import { PIN_HEAD } from './pin-geometry';
+import { createPinFactory } from './pins';
 import { emptyTracks, schedule, type Step, type Timing, type Tracks } from './timeline';
 import {
   fitDistance,
@@ -124,26 +126,31 @@ export function createGameView(
     };
   })();
 
-  new HemisphericLight('light', new Vector3(0.3, 1, -0.4), scene);
+  const light = new HemisphericLight('light', new Vector3(0.3, 1, -0.4), scene);
+  light.groundColor = new Color3(0.45, 0.45, 0.45);
 
   // ---- Model and Pins ----
   const model = buildModel(scene, level.model, material);
-  const pinMeshes = level.pinSockets.map((socket, i) => {
+  const pins = createPinFactory(scene, model.root);
+  const pinSet = level.pinSockets.map((socket, i) => {
     const pin = level.pins[i];
     if (!pin) throw new Error(`Pin ${i} has no rules entry`);
-    const mesh = CreateCylinder(
+    const made = pins.create(
       `pin-${socket.id}`,
-      { diameter: PIN.diameter, height: PIN.height, tessellation: PIN.segments },
-      scene,
+      CANDY[pin.colour] ?? '#ffffff',
+      model.parts[pin.part] ?? null,
     );
     const dir = Vector3.FromArray(socket.direction).normalize();
-    mesh.parent = model.parts[pin.part] ?? null;
-    mesh.position = Vector3.FromArray(socket.position).add(dir.scale(PIN.height / 2));
-    mesh.rotationQuaternion = Quaternion.FromUnitVectorsToRef(Vector3.Up(), dir, new Quaternion());
-    mesh.material = material(CANDY[pin.colour] ?? '#ffffff');
-    mesh.metadata = { pin: i };
-    return mesh;
+    made.head.position = Vector3.FromArray(socket.position);
+    made.head.rotationQuaternion = Quaternion.FromUnitVectorsToRef(
+      Vector3.Up(),
+      dir,
+      new Quaternion(),
+    );
+    made.head.metadata = { pin: i };
+    return made;
   });
+  const pinMeshes = pinSet.map((made) => made.head);
   const pinHome = pinMeshes.map((mesh) => mesh.position.clone());
   const pinDir = level.pinSockets.map((socket) => Vector3.FromArray(socket.direction).normalize());
 
@@ -194,21 +201,27 @@ export function createGameView(
     return mesh;
   }
 
-  /** A Pin head as a flat disc at a point in CSS px. */
-  function hudDisc(name: string, x: number, y: number, diameter: number, hex: string): Mesh {
-    const mesh = CreateCylinder(name, { diameter, height: 1, tessellation: 24 }, scene);
-    mesh.parent = hudRoot;
-    mesh.layerMask = HUD_LAYER;
-    mesh.isPickable = false;
-    mesh.rotation.x = -Math.PI / 2;
-    mesh.position = new Vector3(x, -y, -3);
-    mesh.material = flat(hex);
-    return mesh;
+  /** A Pin head, with its outline, as a flat disc at a point in CSS px. */
+  function hudDisc(
+    name: string,
+    x: number,
+    y: number,
+    diameter: number,
+    hex: string,
+  ): InstancedMesh {
+    const { head } = pins.create(name, hex, hudRoot);
+    head.layerMask = HUD_LAYER;
+    for (const child of head.getChildMeshes()) child.layerMask = HUD_LAYER;
+    head.isPickable = false;
+    head.scaling.setAll(diameter / PIN_HEAD.diameter);
+    head.rotation.x = -Math.PI / 2;
+    head.position = new Vector3(x, -y, -3);
+    return head;
   }
 
   const centre = (r: Rect): { x: number; y: number } => ({ x: r.x + r.w / 2, y: r.y + r.h / 2 });
 
-  function hudPin(name: string, r: Rect, hex: string): Mesh {
+  function hudPin(name: string, r: Rect, hex: string): InstancedMesh {
     const c = centre(r);
     return hudDisc(name, c.x, c.y, r.w * layout.pinHead, hex);
   }
@@ -218,7 +231,7 @@ export function createGameView(
 
   // What the HUD currently shows, kept so steps can move individual pieces.
   let boxNodes: (TransformNode | undefined)[] = [];
-  let bufferPins: (Mesh | undefined)[] = [];
+  let bufferPins: (InstancedMesh | undefined)[] = [];
   let flyCount = 0;
 
   function holeRect(b: number, i: number): Rect {
@@ -233,7 +246,7 @@ export function createGameView(
     return rect;
   }
 
-  function addBoxPin(b: number, i: number, colour: number | null): Mesh {
+  function addBoxPin(b: number, i: number, colour: number | null): InstancedMesh {
     const mesh = hudPin(`box-${b}-pin-${i}`, holeRect(b, i), tintOf(colour));
     mesh.parent = boxNodes[b] ?? hudRoot;
     return mesh;
@@ -313,7 +326,7 @@ export function createGameView(
         const hex = CANDY[colour] ?? '#ffffff';
         let from = Vector3.Zero();
         let dir = Vector3.Up();
-        let disc: Mesh | undefined;
+        let disc: InstancedMesh | undefined;
         let origin = { x: 0, y: 0 };
         const target = (): Rect =>
           step.kind === 'pinToBox' ? holeRect(step.box, step.fill - 1) : slotRect(step.slot);
@@ -328,12 +341,16 @@ export function createGameView(
               from = mesh.position.clone();
               dir = mesh.getDirection(Vector3.Up()).normalize();
             },
-            tick: (p) => mesh.position.copyFrom(from.add(dir.scale(PULL_DISTANCE * ease(p)))),
+            tick: (p) => {
+              mesh.position.copyFrom(from.add(dir.scale(PULL_DISTANCE * ease(p))));
+              pinSet[step.pin]?.setShank(PULL_DISTANCE * ease(p));
+            },
           },
           {
             t0: step.flyAt,
             t1: step.t1,
             start: () => {
+              pinSet[step.pin]?.setShank(null);
               mesh.setEnabled(false);
               origin = toScreen(mesh.position);
               disc = hudDisc(`fly-${flyCount++}`, origin.x, origin.y, 1, hex);
@@ -345,7 +362,7 @@ export function createGameView(
               const e = ease(p);
               disc.position.x = lerp(origin.x, c.x, e);
               disc.position.y = -lerp(origin.y, c.y, e);
-              disc.scaling.setAll(to.w * layout.pinHead * lerp(1.4, 1, e));
+              disc.scaling.setAll((to.w * layout.pinHead * lerp(1.4, 1, e)) / PIN_HEAD.diameter);
             },
             end: () => {
               disc?.dispose();
@@ -410,7 +427,7 @@ export function createGameView(
       case 'bufferDrained': {
         const firstHole = step.fill - step.from.length;
         const flights = step.from.map((slotIndex, k): Task => {
-          let mesh: Mesh | undefined;
+          let mesh: InstancedMesh | undefined;
           return {
             t0: step.launches[k] ?? step.t0,
             t1: step.lands[k] ?? step.t1,
@@ -431,7 +448,7 @@ export function createGameView(
             },
           };
         });
-        const moves: { mesh: Mesh; fromX: number; to: number }[] = [];
+        const moves: { mesh: InstancedMesh; fromX: number; to: number }[] = [];
         const closeGaps: Task = {
           t0: step.lands.at(-1) ?? step.t0,
           t1: step.t1,
@@ -497,6 +514,7 @@ export function createGameView(
         mesh.rotationQuaternion = home.rotation.clone();
       }
       mesh.isPickable = true;
+      pinSet[i]?.setShank(null);
       mesh.setEnabled(!state.removed[i]);
     });
     model.parts.forEach((node, p) => {
@@ -527,7 +545,10 @@ export function createGameView(
       const distance = toHead.length();
       const hit = scene.pickWithRay(
         new Ray(eye, toHead.scale(1 / distance), distance + 1),
-        (other) => other.isEnabled() && other.layerMask !== HUD_LAYER,
+        (other) =>
+          other.isEnabled() &&
+          other.layerMask !== HUD_LAYER &&
+          !(other.metadata as { decor?: boolean } | null)?.decor,
       );
       const visible =
         !hit?.hit || hit.pickedMesh === mesh || (hit.distance ?? 0) >= distance - 0.02;
@@ -633,7 +654,11 @@ export function createGameView(
       const hit = scene.pick(
         x,
         y,
-        (mesh) => mesh.isEnabled() && mesh.isPickable && mesh.layerMask !== HUD_LAYER,
+        (mesh) =>
+          mesh.isEnabled() &&
+          mesh.isPickable &&
+          mesh.layerMask !== HUD_LAYER &&
+          !(mesh.metadata as { decor?: boolean } | null)?.decor,
         false,
         camera,
       );
