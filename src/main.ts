@@ -17,6 +17,7 @@ import { hardwareScalingFor } from './render/render-quality';
 import { readSafeInsets } from './render/safe-insets';
 import { browserStorage, createSettingsStore } from './settings/store';
 import { ICONS, type IconName } from './ui/icons';
+import { startUpdater } from './pwa/updater';
 
 function element<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);
@@ -44,6 +45,7 @@ const OUTCOME_COPY = {
 } as const;
 
 function showOutcome(outcome: 'won' | 'lost'): void {
+  bannerShowing = true;
   outcomePanel.className = outcome;
   outcomeTitle.textContent = OUTCOME_COPY[outcome].title;
   againButton.textContent = OUTCOME_COPY[outcome].button;
@@ -130,6 +132,13 @@ const STATUS: Record<State['status'], string> = {
   lost: 'Lost: out of room in the Buffer.',
 };
 
+// A waiting update is applied only before the first tap of a Level or once a banner shows.
+let bannerShowing = false;
+const updater = startUpdater(() => ({
+  tapsOnLevel: canUndo(history) ? 1 : 0,
+  bannerShowing,
+}));
+
 let devViewer: DevViewer | null = null;
 if (devContent) {
   void import('./dev/viewer').then((m) => {
@@ -148,12 +157,15 @@ function show(): void {
   statusText.textContent = STATUS[history.present.status];
   undoButton.disabled = !canUndo(history);
   outcomePanel.className = 'hidden';
+  bannerShowing = false;
+  updater.recheck();
 }
 
 // Win and lose show only once everything has settled.
 view.onOutcome = (outcome) => {
   statusText.textContent = STATUS[outcome];
   showOutcome(outcome);
+  updater.recheck();
 };
 
 function tapPin(pin: number): void {
