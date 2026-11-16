@@ -12,7 +12,7 @@ import type { InstancedMesh } from '@babylonjs/core/Meshes/instancedMesh.pure';
 import { Mesh } from '@babylonjs/core/Meshes/mesh.pure';
 import type { TransformNode } from '@babylonjs/core/Meshes/transformNode.pure';
 import type { Scene } from '@babylonjs/core/scene.pure';
-import { MARK_CELLS, MARK_CELL_SIZE, markAtlasPixels } from './head-mark-atlas';
+import { MARK_CELLS, MARK_CELL_SIZE, markAtlasPixels, markIndexFor } from './head-mark-atlas';
 import { pinHeadData, pinOutlineData, shankData } from './pin-geometry';
 import type { MeshData } from './rounded-box';
 import { applyData } from './model-scene';
@@ -123,11 +123,19 @@ export interface PinMesh {
 
 export interface PinFactory {
   /** A Pin head at the parent's origin, pointing up (+y) with its base on y = 0. */
-  create(name: string, hex: string, parent: TransformNode | null, mark?: number): PinMesh;
+  create(name: string, hex: string, parent: TransformNode | null, colour: number): PinMesh;
+  /** Switches every Pin, existing and future, between the cross and its colour's drive. */
+  setScrewShapes(on: boolean): void;
 }
 
 /** `home` parents the hidden template meshes, so they stay inside the Model's bounds. */
-export function createPinFactory(scene: Scene, home: TransformNode): PinFactory {
+export function createPinFactory(
+  scene: Scene,
+  home: TransformNode,
+  screwShapes = false,
+): PinFactory {
+  /** Every live head with its colour, so the setting can change only the atlas indices. */
+  const heads = new Map<InstancedMesh, number>();
   const atlas = new RawTexture(
     markAtlasPixels(),
     MARK_CELLS * MARK_CELL_SIZE,
@@ -171,11 +179,19 @@ export function createPinFactory(scene: Scene, home: TransformNode): PinFactory 
   const shank = template('pin-shank-template', shankData(SHANK_LENGTH), shankMaterial);
 
   return {
-    create(name, hex, parent, mark = 0) {
+    setScrewShapes(on) {
+      screwShapes = on;
+      for (const [instance, colour] of heads) {
+        instance.instancedBuffers.markIndex = markIndexFor(colour, on);
+      }
+    },
+    create(name, hex, parent, colour) {
       const instance = head.createInstance(name);
+      heads.set(instance, colour);
+      instance.onDisposeObservable.add(() => heads.delete(instance));
       instance.parent = parent;
       instance.instancedBuffers.pinColor = Color3.FromHexString(hex);
-      instance.instancedBuffers.markIndex = mark;
+      instance.instancedBuffers.markIndex = markIndexFor(colour, screwShapes);
       const ink = outline.createInstance(`ink-${name}`);
       ink.parent = instance;
       ink.isPickable = false;

@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { PIN_HEAD, pinHeadData, pinOutlineData, shankData } from '../src/render/pin-geometry';
-import { MARK_CELLS, MARK_CELL_SIZE, markAtlasPixels, MARKS } from '../src/render/head-mark-atlas';
+import {
+  MARK_CELLS,
+  MARK_CELL_SIZE,
+  markAtlasPixels,
+  markIndexFor,
+  MARKS,
+} from '../src/render/head-mark-atlas';
 import { TOON_BANDS, toonBand, toonShaderCode } from '../src/render/toon';
 import { cylinderBevel, roundedBoxData } from '../src/render/rounded-box';
 import { MSAA_SAMPLES, hardwareScalingFor } from '../src/render/render-quality';
@@ -120,7 +126,7 @@ describe('Head-mark atlas', () => {
     expect(sample(0, 0.5, 0.3).wall).toBe(255);
     expect(sample(0, 0.3, 0.5).wall).toBe(255);
     expect(sample(0, 0.15, 0.15).wall).toBe(0);
-    expect(sample(1, 0.5, 0.5).wall).toBe(0); // unused cell stays empty until ticket 30
+    expect(sample(MARKS.length, 0.5, 0.5).wall).toBe(0); // cells past the last drive stay empty
   });
 
   it('shifts the floor down, so the upper edge shows the wall and the lower edge does not', () => {
@@ -128,6 +134,74 @@ describe('Head-mark atlas', () => {
     const bottomArm = sample(0, 0.5, 0.78);
     expect(topArm).toEqual({ wall: 255, floor: 0 });
     expect(bottomArm).toEqual({ wall: 255, floor: 255 });
+  });
+});
+
+describe('colour-blind drives', () => {
+  const pixels = markAtlasPixels();
+  const wallAt = (mark: (typeof MARKS)[number], u: number, v: number) => {
+    const cell = MARKS.indexOf(mark);
+    const x = cell * MARK_CELL_SIZE + Math.floor(u * MARK_CELL_SIZE);
+    const y = Math.floor(v * MARK_CELL_SIZE);
+    return pixels[(y * MARK_CELLS * MARK_CELL_SIZE + x) * 4] === 255;
+  };
+  const polar = (mark: (typeof MARKS)[number], deg: number, r: number) =>
+    wallAt(
+      mark,
+      0.5 + r * Math.cos((deg * Math.PI) / 180),
+      0.5 + r * Math.sin((deg * Math.PI) / 180),
+    );
+
+  it('holds the six drives in palette order', () => {
+    expect(MARKS).toEqual(['cross', 'slot', 'hex', 'torx', 'square', 'triangle']);
+  });
+
+  it('draws every drive as a non-empty recess no two of which match', () => {
+    const cells = MARKS.map((_, c) => {
+      const out: number[] = [];
+      for (let i = 0; i < MARK_CELL_SIZE * MARK_CELL_SIZE; i++) {
+        const x = c * MARK_CELL_SIZE + (i % MARK_CELL_SIZE);
+        const y = Math.floor(i / MARK_CELL_SIZE);
+        out.push(pixels[(y * MARK_CELLS * MARK_CELL_SIZE + x) * 4] ?? 0);
+      }
+      return out;
+    });
+    cells.forEach((cell, i) => {
+      expect(cell.filter((p) => p === 255).length).toBeGreaterThan(200);
+      cells.slice(i + 1).forEach((other) => expect(other).not.toEqual(cell));
+    });
+  });
+
+  it('draws the slot as one horizontal bar', () => {
+    expect(wallAt('slot', 0.75, 0.5)).toBe(true);
+    expect(wallAt('slot', 0.5, 0.65)).toBe(false);
+  });
+
+  it('draws the hex pointing sideways with flat top and bottom', () => {
+    expect(polar('hex', 0, 0.26)).toBe(true);
+    expect(polar('hex', 90, 0.26)).toBe(false);
+  });
+
+  it('draws the Torx as lobes with notches between them', () => {
+    expect(polar('torx', 0, 0.27)).toBe(true);
+    expect(polar('torx', 30, 0.2)).toBe(false);
+  });
+
+  it('draws the square with its corners filled', () => {
+    expect(wallAt('square', 0.7, 0.7)).toBe(true);
+    expect(wallAt('square', 0.8, 0.5)).toBe(false);
+  });
+
+  it('draws the triangle point up, wide at the bottom', () => {
+    expect(wallAt('triangle', 0.3, 0.66)).toBe(true);
+    expect(wallAt('triangle', 0.3, 0.3)).toBe(false);
+    expect(wallAt('triangle', 0.5, 0.3)).toBe(true);
+  });
+
+  it('picks a mark by colour only with the setting on', () => {
+    expect([0, 1, 2, 3, 4].map((c) => markIndexFor(c, true))).toEqual([0, 1, 2, 3, 4]);
+    expect(markIndexFor(5, true)).toBe(5);
+    expect([0, 3, 5].map((c) => markIndexFor(c, false))).toEqual([0, 0, 0]);
   });
 });
 
