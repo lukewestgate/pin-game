@@ -124,6 +124,24 @@ describe('game view', () => {
     expect(view.layout.bottomBar).toEqual(l.bottomBar);
   });
 
+  it('rings the empty Buffer slots in amber at 2 left and pulses the last one red at 1 left', () => {
+    const { level, engine, view } = setup();
+    current = { view, engine };
+    const size = level.bufferSize;
+    const names = (): string[] =>
+      view.scene.meshes
+        .filter((m) => m.isEnabled() && /^buffer-(ring|pulse)-/.test(m.name))
+        .map((m) => m.name)
+        .sort();
+    const base = initialState(level).state;
+    view.draw({ ...base, buffer: Array<number>(size - 3).fill(0) });
+    expect(names()).toEqual([]);
+    view.draw({ ...base, buffer: Array<number>(size - 2).fill(0) });
+    expect(names()).toEqual([`buffer-ring-${size - 2}`, `buffer-ring-${size - 1}`]);
+    view.draw({ ...base, buffer: Array<number>(size - 1).fill(0) });
+    expect(names()).toEqual([`buffer-pulse-${size - 1}`, `buffer-ring-${size - 1}`]);
+  });
+
   it('centres the turning centre in the Model region and fits the sphere there', () => {
     const { level, engine, view } = setup();
     current = { view, engine };

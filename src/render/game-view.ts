@@ -16,11 +16,14 @@ import { Color3, Color4 } from '@babylonjs/core/Maths/math.color.pure';
 import { Quaternion, Vector3 } from '@babylonjs/core/Maths/math.vector.pure';
 import { Viewport } from '@babylonjs/core/Maths/math.viewport';
 import { CreateCylinder } from '@babylonjs/core/Meshes/Builders/cylinderBuilder.pure';
-import { CreatePlane } from '@babylonjs/core/Meshes/Builders/planeBuilder.pure';
 import { Mesh } from '@babylonjs/core/Meshes/mesh.pure';
+import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode.pure';
 import { Scene } from '@babylonjs/core/scene.pure';
+import { bufferWarning } from './buffer-warning';
 import { PIN, buildModel, materialCache } from './model-scene';
+import { roundedRectData } from './rounded-rect';
+import { UI } from './ui-colours';
 import { emptyTracks, schedule, type Step, type Timing, type Tracks } from './timeline';
 import {
   fitDistance,
@@ -33,9 +36,20 @@ import {
 const HUD_LAYER = 0x10000000;
 const START_YAW = 0.6;
 const START_PITCH = -0.35;
-const GREY_BOX = '#6b7780';
-const BUFFER_MAT = '#1b272d';
-const BUFFER_SLOT = '#0f1a1f';
+
+// Workbench HUD sizes in CSS px (UI visual style).
+const BOX_RADIUS = 12;
+const BOX_BEVEL = 3;
+const BOX_DEPTH = 14;
+const BUFFER_RADIUS = 10;
+const BUFFER_DEPTH = 8;
+const HOLE_SIZE = 0.9;
+const HOLE_SHADOW = 0.1;
+const LIP_WHITE = 0.35;
+/** One red pulse of the last empty Buffer slot, in milliseconds. */
+const PULSE_MS = 900;
+const PULSE_SCALE = 0.08;
+const PULSE_MIN_OPACITY = 0.25;
 
 export interface ViewOptions {
   /** Milliseconds; defaults to `performance.now`. Tests drive it by hand. */
@@ -99,6 +113,7 @@ export function createGameView(
       if (!mat) {
         mat = new StandardMaterial(`hud-${hex}`, scene);
         mat.disableLighting = true;
+        mat.backFaceCulling = false;
         mat.emissiveColor = Color3.FromHexString(hex);
         cache.set(hex, mat);
       }
@@ -163,14 +178,33 @@ export function createGameView(
     camera.radius = fitDistance(model.bounds.radius, m, camera.fov);
   }
 
-  function hudPlane(name: string, r: Rect, z: number, hex: string, inset = 1): Mesh {
-    const mesh = CreatePlane(name, { width: r.w * inset, height: r.h * inset }, scene);
+  /** A flat rounded rectangle at a rect's centre, `drop` px lower (the tin's bevel and depth). */
+  function hudRounded(
+    name: string,
+    r: Rect,
+    z: number,
+    hex: string,
+    radius: number,
+    drop = 0,
+  ): Mesh {
+    const mesh = new Mesh(name, scene);
+    const data = roundedRectData(r.w, r.h, radius);
+    const vertexData = new VertexData();
+    vertexData.positions = data.positions;
+    vertexData.indices = data.indices;
+    vertexData.normals = data.normals;
+    vertexData.applyToMesh(mesh);
     mesh.parent = hudRoot;
     mesh.layerMask = HUD_LAYER;
     mesh.isPickable = false;
-    mesh.position = new Vector3(r.x + r.w / 2, -(r.y + r.h / 2), z);
+    mesh.position = new Vector3(r.x + r.w / 2, -(r.y + r.h / 2 + drop), z);
     mesh.material = flat(hex);
     return mesh;
+  }
+
+  /** A rect shrunk or grown about its centre. */
+  function scaledRect(r: Rect, k: number): Rect {
+    return { x: r.x + (r.w * (1 - k)) / 2, y: r.y + (r.h * (1 - k)) / 2, w: r.w * k, h: r.h * k };
   }
 
   /** A Pin head as a flat disc at a point in CSS px. */
@@ -193,7 +227,7 @@ export function createGameView(
   }
 
   const tintOf = (colour: number | null): string =>
-    colour === null ? GREY_BOX : (CANDY[colour] ?? GREY_BOX);
+    colour === null ? UI.greyBox : (CANDY[colour] ?? UI.greyBox);
 
   // What the HUD currently shows, kept so steps can move individual pieces.
   let boxNodes: (TransformNode | undefined)[] = [];
@@ -226,9 +260,30 @@ export function createGameView(
     node.parent = hudRoot;
     boxNodes[b] = node;
     const tint = tintOf(colour);
-    hudPlane(`box-${b}`, rect, 0, scaled(tint, 0.92)).parent = node;
+    const face = scaled(tint, 0.92);
+    hudRounded(`box-${b}-depth`, rect, 2, scaled(tint, 0.45), BOX_RADIUS, BOX_DEPTH).parent = node;
+    hudRounded(`box-${b}-bevel`, rect, 1, scaled(tint, 0.7), BOX_RADIUS, BOX_BEVEL).parent = node;
+    hudRounded(`box-${b}`, rect, 0, face, BOX_RADIUS).parent = node;
     layout.boxHoles[b]?.forEach((hole, i) => {
-      hudPlane(`box-${b}-hole-${i}`, hole, -1, scaled(tint, 0.42), 0.9).parent = node;
+      const recess = scaledRect(hole, HOLE_SIZE);
+      const radius = recess.w * 0.25;
+      const lip = Color3.Lerp(Color3.FromHexString(face), Color3.White(), LIP_WHITE);
+      hudRounded(
+        `box-${b}-lip-${i}`,
+        scaledRect(hole, 0.98),
+        -0.5,
+        lip.toHexString(),
+        radius + 1,
+      ).parent = node;
+      // The upper inner shadow: the dark recess shows above a lighter floor shifted down.
+      hudRounded(`box-${b}-hole-${i}`, recess, -1, scaled(tint, 0.25), radius).parent = node;
+      const floor = {
+        x: recess.x,
+        y: recess.y + recess.h * HOLE_SHADOW,
+        w: recess.w,
+        h: recess.h * (1 - HOLE_SHADOW),
+      };
+      hudRounded(`box-${b}-floor-${i}`, floor, -1.5, scaled(tint, 0.42), radius).parent = node;
       if (i < fill) addBoxPin(b, i, colour);
     });
     return node;
@@ -239,13 +294,57 @@ export function createGameView(
     boxNodes = [];
     bufferPins = [];
     state.boxes.forEach((box, b) => buildBox(b, box.colour, box.fill));
-    hudPlane('buffer', layout.buffer, 0, BUFFER_MAT);
+    hudRounded(
+      'buffer-depth',
+      layout.buffer,
+      2,
+      scaled(UI.bufferMat, 0.55),
+      BUFFER_RADIUS,
+      BUFFER_DEPTH,
+    );
+    hudRounded('buffer', layout.buffer, 0, UI.bufferMat, BUFFER_RADIUS);
     layout.bufferSlots.forEach((slot, i) => {
-      hudPlane(`buffer-slot-${i}`, slot, -1, BUFFER_SLOT, 0.9);
+      const inner = scaledRect(slot, HOLE_SIZE);
+      hudRounded(`buffer-slot-${i}`, inner, -1, UI.bufferSlot, inner.w * 0.25);
       const colour = state.buffer[i];
       if (colour !== undefined)
         bufferPins[i] = hudPin(`buffer-pin-${i}`, slot, CANDY[colour] ?? '#ffffff');
     });
+    showWarning();
+  }
+
+  // The near-full warning follows the Buffer's count: amber rings, then a red pulse.
+  let warningMeshes: Mesh[] = [];
+  let pulse: { mesh: Mesh; material: StandardMaterial } | null = null;
+  function showWarning(): void {
+    for (const mesh of warningMeshes) mesh.dispose();
+    warningMeshes = [];
+    pulse = null;
+    const count = bufferPins.filter((mesh) => mesh !== undefined).length;
+    const warning = bufferWarning(count, layout.bufferSlots.length);
+    for (const i of warning.amber) {
+      const ring = scaledRect(slotRect(i), 1);
+      const mesh = hudRounded(`buffer-ring-${i}`, ring, -0.5, UI.amber, ring.w * 0.25);
+      warningMeshes.push(mesh);
+    }
+    if (warning.pulse !== null) {
+      const ring = scaledRect(slotRect(warning.pulse), 1);
+      const mesh = hudRounded(`buffer-pulse-${warning.pulse}`, ring, -0.7, UI.fail, ring.w * 0.25);
+      const material = new StandardMaterial(`pulse-${warning.pulse}`, scene);
+      material.disableLighting = true;
+      material.backFaceCulling = false;
+      material.emissiveColor = Color3.FromHexString(UI.fail);
+      mesh.material = material;
+      warningMeshes.push(mesh);
+      pulse = { mesh, material };
+    }
+  }
+
+  function animatePulse(now: number): void {
+    if (!pulse) return;
+    const wave = 0.5 - 0.5 * Math.cos(((now % PULSE_MS) / PULSE_MS) * 2 * Math.PI);
+    pulse.material.alpha = PULSE_MIN_OPACITY + (1 - PULSE_MIN_OPACITY) * wave;
+    pulse.mesh.scaling.setAll(1 + PULSE_SCALE * wave);
   }
 
   // ---- Animation: plays the Timeline's steps and never decides outcomes ----
@@ -331,6 +430,7 @@ export function createGameView(
               if (step.kind === 'pinToBox') addBoxPin(step.box, step.fill - 1, colour);
               else
                 bufferPins[step.slot] = hudPin(`buffer-pin-${step.slot}`, slotRect(step.slot), hex);
+              showWarning();
             },
           },
         ];
@@ -431,6 +531,7 @@ export function createGameView(
               mesh.position.x = centre(slotRect(to)).x;
               bufferPins[to] = mesh;
             }
+            showWarning();
           },
         };
         return [...flights, closeGaps];
@@ -454,7 +555,11 @@ export function createGameView(
     }
     tasks = tasks.filter((task) => now < task.t1);
   }
-  scene.onBeforeRenderObservable.add(() => update(clock()));
+  scene.onBeforeRenderObservable.add(() => {
+    const now = clock();
+    update(now);
+    animatePulse(now);
+  });
 
   function play(events: readonly RulesEvent[]): void {
     const result = schedule(events, clock(), tracks, {
