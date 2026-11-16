@@ -21,7 +21,8 @@
     "test": "vitest run",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "icons": "pwa-assets-generator"
+    "icons": "pwa-assets-generator",
+    "sim": "tsx scripts/sim.ts"
   },
   "dependencies": {
     "@babylonjs/core": "9.36.0",

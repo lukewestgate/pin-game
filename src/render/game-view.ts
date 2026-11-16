@@ -150,6 +150,10 @@ export function createGameView(
   const clock = options.clock ?? (() => performance.now());
   const scene = new Scene(engine);
   scene.clearColor = new Color4(0, 0, 0, 0);
+  // The whole car and HUD are always on screen, so culling only costs CPU (about half the render
+  // time on the headless simulator, `pnpm sim`). Input goes through our own picking, not Babylon's.
+  scene.skipFrustumClipping = true;
+  scene.skipPointerMovePicking = true;
   const material = materialCache(scene);
   const flat = (() => {
     const cache = new Map<string, StandardMaterial>();
@@ -681,6 +685,15 @@ export function createGameView(
     }
     tasks = tasks.filter((task) => now < task.t1);
   }
+  // Shared materials never change once they are drawn, so freezing them skips the per-draw checks
+  // and uniform work that dominate CPU time on a phone. Peek's cloned materials and the pulse
+  // change every frame, so they stay live.
+  const FROZEN = /^(hud-|mat-|pin-|hole-mark)/;
+  scene.onAfterRenderObservable.add(() => {
+    for (const m of scene.materials) {
+      if (!m.isFrozen && FROZEN.test(m.name) && m.isReady()) m.freeze();
+    }
+  });
   scene.onBeforeRenderObservable.add(() => {
     const now = clock();
     update(now);

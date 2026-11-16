@@ -10,7 +10,7 @@ import { isDevMode } from './dev/mode';
 import type { DevViewer } from './dev/viewer';
 import { canUndo, commit, startHistory, undo, type History } from './rules/history';
 import { initialState, tap } from './rules/rules';
-import type { State } from './rules/state';
+import { legalTaps, type State } from './rules/state';
 import { attachInput } from './input/input';
 import { createAudio } from './audio/audio';
 import { createBabylonBackend } from './audio/babylon-backend';
@@ -79,6 +79,10 @@ const engine = new Engine(
 );
 // 4x MSAA from the context's `antialias`, and the pixel ratio capped at about 2.
 engine.setHardwareScalingLevel(hardwareScalingFor(window.devicePixelRatio, quality.maxPixelRatio));
+if (new URLSearchParams(location.search).has('sim')) {
+  // The simulator renders frames in a loop, so shaders must compile at once, not in the background.
+  engine.getCaps().parallelShaderCompile = undefined;
+}
 const settings = createSettingsStore(browserStorage());
 const view = createGameView(engine, level, readSafeInsets, {
   screwShapes: settings.get('screwShapes'),
@@ -236,6 +240,21 @@ window.addEventListener('resize', () => {
 
 show();
 view.warmUp();
+if (new URLSearchParams(location.search).has('sim')) {
+  // Awaited, so the page's load event (what a headless screenshot waits for) follows the report.
+  const sim = await import('./dev/sim');
+  await sim.runSim({
+    engine,
+    scene: view.scene,
+    canvas,
+    tapNext: () => {
+      const next = legalTaps(level, history.present)[0];
+      if (next === undefined) return false;
+      tapPin(next);
+      return true;
+    },
+  });
+}
 engine.runRenderLoop(() => {
   input.tick(performance.now());
   audio.tick(performance.now());
