@@ -1,6 +1,7 @@
 // 3-band toon shading as a StandardMaterial plugin: it snaps the light that reached a pixel to
 // one of three levels. The band numbers live here and are written into the shader snippet.
 import { MaterialPluginBase } from '@babylonjs/core/Materials/materialPluginBase.pure';
+import { RegisterClass } from '@babylonjs/core/Misc/typeStore';
 import type { Material } from '@babylonjs/core/Materials/material.pure';
 
 /** Light at or above `from` (0..1) is drawn at `level`. Ascending. */
@@ -45,3 +46,6 @@ export class ToonPlugin extends MaterialPluginBase {
     return shaderType === 'fragment' ? { CUSTOM_FRAGMENT_BEFORE_FOG: toonShaderCode() } : null;
   }
 }
+
+// Material.clone re-instantiates plugins by registered class name; Peek clones Part materials.
+RegisterClass('BABYLON.ToonPlugin', ToonPlugin);

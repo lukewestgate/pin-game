@@ -134,4 +134,51 @@ describe('game view input support', () => {
     expect(mesh?.position.equals(home)).toBe(true);
     expect(bonnet?.getChildMeshes().some((m) => m.renderOverlay)).toBe(false);
   });
+
+  it('Peeks the Part of the pressed Pin to 0.22 opacity over 120 ms, and fades back on release', () => {
+    const { view } = setup();
+    const roof = view.scene.getTransformNodeByName('part-roof');
+    const meshes = roof?.getChildMeshes().filter((m) => m.metadata === null) ?? [];
+    expect(meshes.length).toBeGreaterThan(0);
+    const alpha = () => meshes.map((m) => m.material?.alpha ?? 1);
+    view.updateFeedback(1000);
+    view.peekAt(0, 0, index('roof-1'), 1000);
+    view.updateFeedback(1060);
+    expect(alpha()[0]).toBeCloseTo(1 - (1 - FEEDBACK.peekAlpha) / 2, 6);
+    view.updateFeedback(1200);
+    for (const a of alpha()) expect(a).toBeCloseTo(FEEDBACK.peekAlpha, 6);
+    expect(meshes[0]?.material?.needDepthPrePass).toBe(true);
+    // Other Parts stay solid.
+    const bonnet = view.scene.getTransformNodeByName('part-bonnet');
+    for (const m of bonnet?.getChildMeshes() ?? []) expect(m.material?.alpha).toBe(1);
+    view.peekEnd();
+    view.updateFeedback(1260);
+    expect(alpha()[0]).toBeCloseTo(FEEDBACK.peekAlpha + (1 - FEEDBACK.peekAlpha) / 2, 6);
+    view.updateFeedback(1400);
+    for (const m of meshes) expect(m.material?.alpha).toBe(1);
+  });
+
+  it('Peeks the first Part the ray hits when no Pin is under the press, and nothing in empty space', () => {
+    const { view } = setup();
+    const m = view.layout.model;
+    view.updateFeedback(0);
+    view.peekAt(m.x + m.w / 2, m.y + m.h / 2, null, 0);
+    view.updateFeedback(500);
+    expect(view.peeking()).not.toBeNull();
+    view.peekEnd();
+    view.updateFeedback(1000);
+    view.peekAt(1, 1, null, 1000);
+    expect(view.peeking()).toBeNull();
+  });
+
+  it('leaves the rules state untouched by a Peek', () => {
+    const { view } = setup();
+    const before = JSON.stringify(state);
+    view.peekAt(0, 0, index('roof-1'), 0);
+    view.updateFeedback(500);
+    view.peekEnd();
+    view.updateFeedback(1000);
+    expect(JSON.stringify(state)).toBe(before);
+    expect(view.candidates(state).length).toBe(level.pins.length);
+  });
 });

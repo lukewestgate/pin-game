@@ -13,6 +13,10 @@ export interface InputHost {
   setZoom(zoom: number): void;
   turn(dx: number, dy: number): void;
   highlight(pin: number | null): void;
+  /** A hold started: Peek the Part of `pin`, else the first Part under (x, y), else nothing. */
+  peekAt(x: number, y: number, pin: number | null): void;
+  /** The hold ended. */
+  peekEnd(): void;
   /** A tap on a tappable Pin. */
   tapPin(pin: number): void;
   /** A tap on a Blocked Pin. */
@@ -63,7 +67,16 @@ export function attachInput(canvas: HTMLCanvasElement, host: InputHost): Input {
       case 'pinch':
         host.setZoom(pinchZoom(zoomAtPinchStart, intent.ratio, CAMERA));
         break;
-      // Peek (ticket 27) will use holdStart and holdEnd; dragStart/dragEnd/pinchEnd need no action.
+      case 'holdStart':
+        // The hold is located where the press started, and only inside the Model region.
+        if (!inRegion(intent.x, intent.y)) break;
+        host.peekAt(intent.x, intent.y, pick(intent.x, intent.y).id);
+        navigator.vibrate?.(FEEDBACK.vibratePeekMs);
+        break;
+      case 'holdEnd':
+        host.peekEnd();
+        break;
+      // dragStart, dragEnd and pinchEnd need no action.
       default:
         break;
     }
