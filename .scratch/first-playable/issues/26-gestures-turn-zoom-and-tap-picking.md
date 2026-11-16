@@ -4,7 +4,7 @@
 
 **Blocked by:** 23 (Wooden-toy car and frozen Level), 24 (Layout and HUD reflow).
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] A pure `gestureStep(state, event, K) → { state, out }`, fed pointer events and a per-frame `tick`, emitting the spec's intents. The DOM glue lives in the input module.
 - [x] A pure `pickPin(x, y, candidates, K) → { id, how }`. Render builds the candidates (projected head, drawn radius, visibility by one ray to the head, Blocked from rules state, depth).

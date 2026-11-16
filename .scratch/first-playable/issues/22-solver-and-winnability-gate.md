@@ -4,7 +4,7 @@
 
 **Blocked by:** 20 (Walking skeleton).
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] The prototype's solver is ported to pure TS: a depth-first search over tap orders with a memo of visited states and a node budget, giving `winnable`, `unwinnable` or `unknown`.
 - [x] The report gives the verdict, one winning tap order, nodes explored, random-tap win rate (1000 playouts, fixed seed, the prototype's playout loop copied exactly), share of first taps that can still win, and peak Buffer use along the winning order.

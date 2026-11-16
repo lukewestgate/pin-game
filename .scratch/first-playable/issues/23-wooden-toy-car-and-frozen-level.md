@@ -4,7 +4,7 @@
 
 **Blocked by:** 21 (Content validation and rules edge cases), 22 (Solver and winnability gate).
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] The schema gains an optional per-shape `round` (edge radius, clamped to fit) and `finish: "wood"` (procedural grain drawn in code at load time, with no image asset). Rounded boxes get box-projected UVs (one repeat per 1.2 units), and lathed shapes use their own.
 - [x] The car Model JSON matches Car Model prototype variant C: the Part ids, the 16 outer and 14 inner Sockets with their positions (`SK.sockets`), `coveredBy` as in ticket 07, the Cores (chassis, two bumpers, two headlights) and the wooden-toy car colours.

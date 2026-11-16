@@ -4,7 +4,7 @@
 
 **Blocked by:** 26 (Gestures: turn, zoom and tap picking).
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] `holdMs` 240 without passing the slop emits `holdStart`. The Peeked Part is the Part of the Pin under the press if there is one, otherwise the first Part the ray hits. A hold over empty space Peeks nothing and can still turn the car.
 - [x] The Part fades to 0.22 opacity over 120 ms using a depth pre-pass, and fades back at the same rate on `holdEnd`.

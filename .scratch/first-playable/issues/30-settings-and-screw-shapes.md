@@ -4,7 +4,7 @@
 
 **Blocked by:** 28 (Workbench 3D look), 29 (Workbench HUD look).
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] A small settings store interface (load/get/set), backed by `localStorage`, holding `sound` (default on) and `screwShapes` (default off). It falls back to memory if storage is unavailable. Tested headless with a fake storage.
 - [x] The settings sheet opens above the Settings button with two switches, "Sound" and "Screw shapes (colour-blind help)", and has room for more.

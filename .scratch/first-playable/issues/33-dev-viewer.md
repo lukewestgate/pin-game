@@ -4,7 +4,7 @@
 
 **Blocked by:** 22 (Solver and winnability gate), 23 (Wooden-toy car and frozen Level).
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] Off for players. On in Vite dev mode or with `?dev`.
 - [x] Labels Part and Socket ids. Selecting a Socket highlights the Parts in its `coveredBy` list.

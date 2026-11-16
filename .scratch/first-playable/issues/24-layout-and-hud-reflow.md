@@ -4,7 +4,7 @@
 
 **Blocked by:** 20 (Walking skeleton).
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] A pure `layout(screen, safeInsets, level) → rects` in CSS px, with no Babylon or DOM imports. The bands are margin 10, Box row (10 apart, centred), gap 8, Buffer, margin 10, Model region, margin 10, bottom bar 48, margin 10. Every number is a developer constant.
 - [x] Boxes are roughly square with slots in two rows (top row ⌈Capacity/2⌉). Box width = min((available − gaps) / Box count, columns × 46 + 12). Slot = (Box width − 12) / columns. A Pin head is 0.78 of its slot. Buffer slot = min(52, 0.8 × Box slot, what fits in one row).

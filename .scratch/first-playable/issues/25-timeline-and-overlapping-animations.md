@@ -4,7 +4,7 @@
 
 **Blocked by:** 23 (Wooden-toy car and frozen Level), 24 (Layout and HUD reflow).
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] A pure `Timeline.schedule(events, now, tracks, opts) → { steps, tracks }` with no Babylon or DOM imports. Tracks cover each Box slot and the Buffer (one serial track).
 - [x] Taps go to the rules immediately and are never ignored or queued. Blocked is judged on the rules state, so a Pin is tappable while its covering Part is still falling.

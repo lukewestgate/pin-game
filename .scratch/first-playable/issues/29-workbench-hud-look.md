@@ -4,7 +4,7 @@
 
 **Blocked by:** 24 (Layout and HUD reflow), 25 (Timeline and overlapping animations).
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] Boxes are solid tins (colour × 0.92) with 12 px corners, a 3 px front bevel and 14 px depth. Holes are recesses (colour × 0.42) at 0.9 of the slot, with an upper inner shadow and a 35%-white lip. Grey Boxes for "no qualifying colour" are drawn too.
 - [x] The Buffer is a `#1b272d` mat with 10 px corners and 8 px depth, and `#0f1a1f` slots. The warning is a pure function of Buffer count: 2 left → amber `#ffb020` rings on empty slots; 1 left → that slot also pulses red `#ff3b47` (about 0.9 s, opacity 0.25 → 1, scale 1 → 1.08).

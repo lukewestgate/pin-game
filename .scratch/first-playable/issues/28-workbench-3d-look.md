@@ -4,7 +4,7 @@
 
 **Blocked by:** 23 (Wooden-toy car and frozen Level).
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] 3-band toon shading (`CellMaterial` or an own ramp in a material plugin), with no raw GLSL.
 - [x] Ink outlines on Pins only (car, Box and Buffer Pins). Parts and HUD objects get none.

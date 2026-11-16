@@ -4,7 +4,7 @@
 
 **Blocked by:** 25 (Timeline and overlapping animations), 30 (Settings sheet and Screw shapes).
 
-**Status:** done
+**Status:** resolved
 
 - [x] Babylon AudioEngineV2 with `disableDefaultUI`, keeping its re-unlock. `unlockAsync()` is called on the first `pointerup` (including a drag's end). Sounds before the unlock are dropped. `navigator.audioSession.type = 'ambient'` is set where supported.
 - [x] The audio module subscribes to scheduled Timeline steps and plays at step start times (pull-out at tap time). It stays out of the rules and Timeline modules.

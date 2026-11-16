@@ -4,7 +4,7 @@
 
 **Blocked by:** 20 (Walking skeleton).
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] Cross-field validation runs after Zod parsing as plain functions: every Socket has a colour; each colour's total is a multiple of Capacity; covering has no loops; no Core covers a Socket; no Socket is covered by its own Part; ids are unique; the Model id exists.
 - [x] One failing test per check (plus a bad Zod shape), each with an inline Model or Level. Each asserts that the error names the file and the Part or Socket id.
