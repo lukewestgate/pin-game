@@ -42,6 +42,10 @@ export interface FeedbackConstants {
   wiggleCycles: number;
   flashMs: number;
   vibrateBlockedMs: number;
+  /** Opacity of a Peeked Part, and the time to fade to it (and back). */
+  peekAlpha: number;
+  peekFadeMs: number;
+  vibratePeekMs: number;
 }
 
 export const GESTURE: GestureConstants = {
@@ -76,4 +80,7 @@ export const FEEDBACK: FeedbackConstants = {
   wiggleCycles: 3,
   flashMs: 350,
   vibrateBlockedMs: 18,
+  peekAlpha: 0.22,
+  peekFadeMs: 120,
+  vibratePeekMs: 10,
 };

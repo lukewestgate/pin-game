@@ -22,3 +22,14 @@ export function perpendicular(dir: readonly [number, number, number]): [number, 
   const len = Math.hypot(cx, cy, cz) || 1;
   return [cx / len, cy / len, cz / len];
 }
+
+/** A Peeked Part's opacity after `dtMs`: fades towards `peekAlpha` while Peeking, else back to 1. */
+export function peekStep(
+  alpha: number,
+  peeking: boolean,
+  dtMs: number,
+  K: FeedbackConstants,
+): number {
+  const step = ((1 - K.peekAlpha) * Math.max(0, dtMs)) / K.peekFadeMs;
+  return peeking ? Math.max(K.peekAlpha, alpha - step) : Math.min(1, alpha + step);
+}

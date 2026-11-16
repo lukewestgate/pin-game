@@ -113,6 +113,8 @@ const input = attachInput(canvas, {
   setZoom: (z) => view.setZoom(z),
   turn: (dx, dy) => view.turn(dx, dy),
   highlight: (pin) => view.highlight(pin),
+  peekAt: (x, y, pin) => view.peekAt(x, y, pin, performance.now()),
+  peekEnd: () => view.peekEnd(),
   tapPin,
   blockedTap: (pin) => view.blockedTap(pin, history.present, performance.now()),
 });

@@ -14,6 +14,7 @@ import { Camera } from '@babylonjs/core/Cameras/camera.pure';
 import { FreeCamera } from '@babylonjs/core/Cameras/freeCamera.pure';
 import type { AbstractEngine } from '@babylonjs/core/Engines/abstractEngine.pure';
 import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight.pure';
+import type { Material } from '@babylonjs/core/Materials/material.pure';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial.pure';
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color.pure';
 import { Matrix, Quaternion, Vector3 } from '@babylonjs/core/Maths/math.vector.pure';
@@ -21,11 +22,12 @@ import { Viewport } from '@babylonjs/core/Maths/math.viewport';
 import { Ray } from '@babylonjs/core/Culling/ray.pure';
 import { CreateCylinder } from '@babylonjs/core/Meshes/Builders/cylinderBuilder.pure';
 import { CreatePlane } from '@babylonjs/core/Meshes/Builders/planeBuilder.pure';
+import type { AbstractMesh } from '@babylonjs/core/Meshes/abstractMesh.pure';
 import { Mesh } from '@babylonjs/core/Meshes/mesh.pure';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode.pure';
 import { Scene } from '@babylonjs/core/scene.pure';
 import { PIN, buildModel, materialCache } from './model-scene';
-import { flashStrength, perpendicular, wiggleOffset } from './pin-feedback';
+import { flashStrength, peekStep, perpendicular, wiggleOffset } from './pin-feedback';
 import { emptyTracks, schedule, type Step, type Timing, type Tracks } from './timeline';
 import {
   fitDistance,
@@ -91,6 +93,15 @@ export interface GameView {
   blockedTap(pin: number, state: State, now: number): void;
   /** Advances the feedback animations to `now` (ms). Runs before every render. */
   updateFeedback(now: number): void;
+  /**
+   * Starts a Peek at a press (CSS px): the Part of `pin` if there is one, else the first Part the
+   * ray hits, else nothing. `now` (ms) starts the fade. Never touches rules state.
+   */
+  peekAt(x: number, y: number, pin: number | null, now: number): void;
+  /** Fades the Peeked Part back to solid. */
+  peekEnd(): void;
+  /** The Part index being Peeked, if any. */
+  peeking(): number | null;
   /** Call after the canvas changes size. */
   resize(): void;
   dispose(): void;
@@ -570,6 +581,7 @@ export function createGameView(
   }
 
   function updateFeedback(now: number): void {
+    updatePeek(now);
     for (const [pin, t0] of wiggles) {
       const mesh = pinMeshes[pin];
       const home = pinHome[pin];
@@ -591,6 +603,72 @@ export function createGameView(
     }
   }
   scene.onBeforeRenderObservable.add(() => updateFeedback(clock()));
+
+  // ---- Peek: one Part fades to see-through. Part materials are shared by colour, so each fading
+  // mesh gets its own clone (with a depth pre-pass, so the see-through Part sorts cleanly) and
+  // gets the shared one back once solid again.
+  const fading = new Map<number, { alpha: number; swaps: Map<AbstractMesh, Material> }>();
+  let peeked: number | null = null;
+  let lastPeekTick: number | null = null;
+  const partMeshes = (part: number): AbstractMesh[] =>
+    (model.parts[part]?.getChildMeshes() ?? []).filter(
+      (m) => (m.metadata as { pin?: unknown } | null)?.pin === undefined,
+    );
+
+  function peekAt(x: number, y: number, pin: number | null, now: number): void {
+    peekEnd();
+    let part: number | null = null;
+    if (pin !== null) part = level.pins[pin]?.part ?? null;
+    else {
+      const hit = scene.pick(
+        x,
+        y,
+        (mesh) => mesh.isEnabled() && mesh.isPickable && mesh.layerMask !== HUD_LAYER,
+        false,
+        camera,
+      );
+      const node = hit.pickedMesh?.parent;
+      const found = node ? model.parts.indexOf(node as TransformNode) : -1;
+      if (found >= 0) part = found;
+    }
+    if (part === null) return;
+    peeked = part;
+    lastPeekTick = now;
+    let entry = fading.get(part);
+    if (!entry) {
+      entry = { alpha: 1, swaps: new Map() };
+      fading.set(part, entry);
+    }
+    for (const mesh of partMeshes(part)) {
+      const shared = mesh.material;
+      if (!shared || entry.swaps.has(mesh)) continue;
+      entry.swaps.set(mesh, shared);
+      const own = shared.clone(`${shared.name}-peek`);
+      if (!own) continue;
+      own.needDepthPrePass = true;
+      mesh.material = own;
+    }
+  }
+
+  function peekEnd(): void {
+    peeked = null;
+  }
+
+  function updatePeek(now: number): void {
+    const dt = lastPeekTick === null ? 0 : now - lastPeekTick;
+    lastPeekTick = now;
+    for (const [part, entry] of fading) {
+      entry.alpha = peekStep(entry.alpha, part === peeked, dt, FEEDBACK);
+      for (const mesh of partMeshes(part)) if (mesh.material) mesh.material.alpha = entry.alpha;
+      if (entry.alpha === 1 && part !== peeked) {
+        for (const [mesh, shared] of entry.swaps) {
+          mesh.material?.dispose();
+          mesh.material = shared;
+        }
+        fading.delete(part);
+      }
+    }
+  }
 
   fitCameras();
 
@@ -622,6 +700,9 @@ export function createGameView(
     highlight,
     blockedTap,
     updateFeedback,
+    peekAt,
+    peekEnd,
+    peeking: () => peeked,
     play,
     get onOutcome() {
       return outcomeHandler;
